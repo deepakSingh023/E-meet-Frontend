@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import socket from "../socket";
+import socket from "../sockets";
 import { getLocalStream, createPeerConnection, getPeers } from "../webrtc";
 
 export default function Meeting() {
