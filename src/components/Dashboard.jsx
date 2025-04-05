@@ -12,7 +12,7 @@ export default function Dashboard() {
     try {
       const token = getAuthToken();
       const response = await axios.post(
-        "http://localhost:3000/api/meet/create-meeting",
+        `${process.env.backendURL}/api/meet/create-meeting`,
         {},
         {
           headers: { Authorization: `Bearer ${token}` },

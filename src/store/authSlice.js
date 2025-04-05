@@ -13,7 +13,7 @@ export const loginUser = createAsyncThunk(
     "auth/loginUser", // Action type prefix
     async ({ username, password }, { rejectWithValue }) => {
       try {
-        const response = await axios.post("http://localhost:3000/api/auth/login", { username, password });
+        const response = await axios.post(`${process.env.backendURL}/api/auth/login`, { username, password });
   
         // Store the token in localStorage
         localStorage.setItem("token", response.data.token);
@@ -29,7 +29,7 @@ export const loginUser = createAsyncThunk(
     "auth/registerUser",
     async ({ username, password }, { rejectWithValue }) => {
       try {
-        const response = await axios.post("http://localhost:3000/api/auth/register", { username, password});
+        const response = await axios.post(`${process.env.backendURL}/api/auth/register`, { username, password});
         return response.data;
       } catch (error) {
         return rejectWithValue(error.response.data);
