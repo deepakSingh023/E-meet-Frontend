@@ -26,25 +26,29 @@ export default function Meeting() {
 
       socket.emit("join-room", meetingId);
 
-      socket.on("user-joined", async ({ userId }) => {
+      socket.on("user-joined", async ({ userId, existingUsers }) => {
+        // Existing participants create connection to new user
+        const stream = await getLocalStream();
         const pc = await createPeerConnection(socket, userId, handleRemoteStream, stream);
         getPeers()[userId] = pc;
-
+      
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-
+      
         socket.emit("offer", { target: userId, offer });
-      });
-
-      socket.on("offer", async ({ sender, offer }) => {
-        const pc = await createPeerConnection(socket, sender, handleRemoteStream, stream);
-        getPeers()[sender] = pc;
-
-        await pc.setRemoteDescription(new RTCSessionDescription(offer));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-
-        socket.emit("answer", { target: sender, answer });
+        
+        // New user also connects to all existing participants
+        if (existingUsers && existingUsers.length > 0) {
+          for (const existingUserId of existingUsers) {
+            const pc = await createPeerConnection(socket, existingUserId, handleRemoteStream, stream);
+            getPeers()[existingUserId] = pc;
+      
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+      
+            socket.emit("offer", { target: existingUserId, offer });
+          }
+        }
       });
 
       socket.on("answer", async ({ sender, answer }) => {
