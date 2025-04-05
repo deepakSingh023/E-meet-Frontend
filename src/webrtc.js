@@ -1,43 +1,64 @@
-let localStream;
+import socket from "./sockets";
+
 const peers = {};
 
+export const getPeers = () => peers;
+
 export const getLocalStream = async () => {
-  if (!localStream) {
-    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: true,
+    });
+    return stream;
+  } catch (err) {
+    console.error("Error accessing media devices.", err);
+    throw err;
   }
-  return localStream;
 };
 
-export const createPeerConnection = async (socket, remoteUserId, onRemoteStream, localStream) => {
-  const pc = new RTCPeerConnection({
-    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+export const createPeerConnection = (socket, peerId, onRemoteStream, localStream) => {
+  const peerConnection = new RTCPeerConnection({
+    iceServers: [
+      {
+        urls: "stun:stun.l.google.com:19302",
+      },
+    ],
   });
 
-  // Add local audio/video tracks to the peer connection
-  localStream.getTracks().forEach(track => {
-    pc.addTrack(track, localStream);
+  // Add local tracks
+  localStream.getTracks().forEach((track) => {
+    peerConnection.addTrack(track, localStream);
   });
 
-  // Send ICE candidates to remote peer
-  pc.onicecandidate = (event) => {
+  // Handle incoming ICE candidates
+  peerConnection.onicecandidate = (event) => {
     if (event.candidate) {
       socket.emit("ice-candidate", {
-        target: remoteUserId,
+        target: peerId,
         candidate: event.candidate,
       });
     }
   };
 
-  // Receive remote stream
-  pc.ontrack = (event) => {
-    console.log("Received remote track from:", remoteUserId);
-    const remoteStream = event.streams[0];
-    if (onRemoteStream) {
-      onRemoteStream(remoteUserId, remoteStream);
-    }
+  // When remote stream arrives
+  peerConnection.ontrack = (event) => {
+    onRemoteStream(peerId, event.streams[0]);
   };
 
-  return pc;
-};
+  // Answer incoming offers
+  socket.on("offer", async ({ sender, offer }) => {
+    if (sender !== peerId) return;
 
-export const getPeers = () => peers;
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+
+    socket.emit("answer", {
+      target: sender,
+      answer,
+    });
+  });
+
+  return peerConnection;
+};

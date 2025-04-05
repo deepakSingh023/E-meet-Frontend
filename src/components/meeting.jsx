@@ -13,80 +13,76 @@ export default function Meeting() {
   const [isVideoOn, setIsVideoOn] = useState(true);
 
   useEffect(() => {
-  const handleRemoteStream = (userId, stream) => {
-    setRemoteVideos((prev) => ({ ...prev, [userId]: stream }));
-  };
+    const handleRemoteStream = (videoCallId, stream) => {
+      setRemoteVideos((prev) => ({ ...prev, [videoCallId]: stream }));
+    };
 
-  const init = async () => {
-    const stream = await getLocalStream();
-    setLocalStream(stream);
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = stream;
-    }
+    const init = async () => {
+      const stream = await getLocalStream();
+      setLocalStream(stream);
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
 
-    // Join meeting
-    socket.emit("join-meeting", { meetingId, token: localStorage.getItem("token") });
+      socket.emit("join-meeting", {
+        meetingId,
+        token: localStorage.getItem("token"),
+      });
 
-    // You receive info about existing users in the room
-    socket.on("user-joined", async ({ userId }) => {
-      // Only create offer if YOU are the one joining
-      if (userId !== socket.id) {
-        const pc = await createPeerConnection(socket, userId, handleRemoteStream, stream);
-        getPeers()[userId] = pc;
+      socket.on("existing-users", async ({ existingUsers }) => {
+        for (const otherId of existingUsers) {
+          const pc = await createPeerConnection(socket, otherId, handleRemoteStream, stream);
+          getPeers()[otherId] = pc;
+
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          socket.emit("offer", { target: otherId, offer });
+        }
+      });
+
+      socket.on("user-joined", async ({ userId, videoCallId }) => {
+        const pc = await createPeerConnection(socket, videoCallId, handleRemoteStream, stream);
+        getPeers()[videoCallId] = pc;
 
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
+        socket.emit("offer", { target: videoCallId, offer });
+      });
 
-        socket.emit("offer", { target: userId, offer });
-      }
-    });
+      socket.on("answer", async ({ sender, answer }) => {
+        const pc = getPeers()[sender];
+        if (pc) {
+          await pc.setRemoteDescription(new RTCSessionDescription(answer));
+        }
+      });
 
-    socket.on("offer", async ({ sender, offer }) => {
-      const pc = await createPeerConnection(socket, sender, handleRemoteStream, stream);
-      getPeers()[sender] = pc;
+      socket.on("ice-candidate", ({ sender, candidate }) => {
+        const pc = getPeers()[sender];
+        if (pc && candidate) {
+          pc.addIceCandidate(new RTCIceCandidate(candidate));
+        }
+      });
 
-      await pc.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
+      socket.on("user-left", ({ videoCallId }) => {
+        const pc = getPeers()[videoCallId];
+        if (pc) {
+          pc.close();
+          delete getPeers()[videoCallId];
+          setRemoteVideos((prev) => {
+            const updated = { ...prev };
+            delete updated[videoCallId];
+            return updated;
+          });
+        }
+      });
+    };
 
-      socket.emit("answer", { target: sender, answer });
-    });
+    init();
 
-    socket.on("answer", async ({ sender, answer }) => {
-      const pc = getPeers()[sender];
-      if (pc) {
-        await pc.setRemoteDescription(new RTCSessionDescription(answer));
-      }
-    });
-
-    socket.on("ice-candidate", ({ sender, candidate }) => {
-      const pc = getPeers()[sender];
-      if (pc && candidate) {
-        pc.addIceCandidate(new RTCIceCandidate(candidate));
-      }
-    });
-
-    socket.on("user-left", ({ userId }) => {
-      const pc = getPeers()[userId];
-      if (pc) {
-        pc.close();
-        delete getPeers()[userId];
-        setRemoteVideos((prev) => {
-          const updated = { ...prev };
-          delete updated[userId];
-          return updated;
-        });
-      }
-    });
-  };
-
-  init();
-
-  return () => {
-    endCall();
-  };
-}, [meetingId]);
-
+    return () => {
+      endCall();
+    };
+  }, [meetingId]);
 
   const toggleMic = () => {
     if (localStream) {
