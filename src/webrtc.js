@@ -8,12 +8,15 @@ export const getLocalStream = async () => {
   return localStream;
 };
 
-export const createPeerConnection = (socket, remoteUserId, localVideoRef, onRemoteStream) => {
+export const createPeerConnection = async (socket, remoteUserId, onRemoteStream) => {
+  const stream = await getLocalStream(); // ensure localStream is initialized
+
   const pc = new RTCPeerConnection({
-    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
   });
 
-  localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+  // Add local tracks to peer connection
+  stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
   pc.onicecandidate = (event) => {
     if (event.candidate) {

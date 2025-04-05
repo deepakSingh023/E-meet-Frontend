@@ -21,7 +21,7 @@ export default function Meeting() {
       socket.emit("join-room", meetingId);
 
       socket.on("user-joined", async ({ userId }) => {
-        const pc = createPeerConnection(socket, userId, localVideoRef, handleRemoteStream);
+        const pc = await createPeerConnection(socket, userId, handleRemoteStream);
         getPeers()[userId] = pc;
 
         const offer = await pc.createOffer();
@@ -31,7 +31,7 @@ export default function Meeting() {
       });
 
       socket.on("offer", async ({ sender, offer }) => {
-        const pc = createPeerConnection(socket, sender, localVideoRef, handleRemoteStream);
+        const pc = await createPeerConnection(socket, sender, handleRemoteStream);
         getPeers()[sender] = pc;
 
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
@@ -71,11 +71,10 @@ export default function Meeting() {
     init();
 
     return () => {
-      endCall(); // cleanup when component unmounts
+      endCall();
     };
   }, [meetingId]);
 
-  
   const toggleMic = () => {
     if (localStream) {
       localStream.getAudioTracks().forEach(track => {
@@ -85,7 +84,6 @@ export default function Meeting() {
     }
   };
 
-  
   const toggleVideo = () => {
     if (localStream) {
       localStream.getVideoTracks().forEach(track => {
@@ -95,7 +93,6 @@ export default function Meeting() {
     }
   };
 
-  
   const endCall = () => {
     socket.emit("leave-room", meetingId);
     socket.disconnect();
@@ -123,7 +120,9 @@ export default function Meeting() {
             autoPlay
             playsInline
             className="w-64 h-40 bg-black"
-            ref={(el) => { if (el) el.srcObject = stream; }}
+            ref={(el) => {
+              if (el && stream) el.srcObject = stream;
+            }}
           />
         ))}
       </div>
@@ -151,4 +150,3 @@ export default function Meeting() {
     </div>
   );
 }
-
