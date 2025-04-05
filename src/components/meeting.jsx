@@ -13,8 +13,9 @@ export default function Meeting() {
   const [isVideoOn, setIsVideoOn] = useState(true);
 
   useEffect(() => {
-    const handleRemoteStream = (videoCallId, stream) => {
-      setRemoteVideos((prev) => ({ ...prev, [videoCallId]: stream }));
+    const handleRemoteStream = (userId, stream) => {
+      console.log("🎥 Remote stream received from:", userId);
+      setRemoteVideos((prev) => ({ ...prev, [userId]: stream }));
     };
 
     const init = async () => {
@@ -24,11 +25,13 @@ export default function Meeting() {
         localVideoRef.current.srcObject = stream;
       }
 
+      socket.connect(); // Ensure reconnection
       socket.emit("join-meeting", {
         meetingId,
         token: localStorage.getItem("token"),
       });
 
+      // Handle other users already in room
       socket.on("existing-users", async ({ existingUsers }) => {
         for (const otherId of existingUsers) {
           const pc = await createPeerConnection(socket, otherId, handleRemoteStream, stream);
@@ -40,7 +43,10 @@ export default function Meeting() {
         }
       });
 
+      // New user joined after you
       socket.on("user-joined", async ({ userId, videoCallId }) => {
+        if (getPeers()[videoCallId]) return; // avoid duplicate connections
+
         const pc = await createPeerConnection(socket, videoCallId, handleRemoteStream, stream);
         getPeers()[videoCallId] = pc;
 
@@ -49,6 +55,7 @@ export default function Meeting() {
         socket.emit("offer", { target: videoCallId, offer });
       });
 
+      // Receive answer
       socket.on("answer", async ({ sender, answer }) => {
         const pc = getPeers()[sender];
         if (pc) {
@@ -56,6 +63,7 @@ export default function Meeting() {
         }
       });
 
+      // Receive ICE candidate
       socket.on("ice-candidate", ({ sender, candidate }) => {
         const pc = getPeers()[sender];
         if (pc && candidate) {
@@ -63,6 +71,7 @@ export default function Meeting() {
         }
       });
 
+      // Handle user leaving
       socket.on("user-left", ({ videoCallId }) => {
         const pc = getPeers()[videoCallId];
         if (pc) {
@@ -117,18 +126,24 @@ export default function Meeting() {
   };
 
   return (
-    <div className="flex flex-col items-center">
-      <h1 className="text-2xl font-bold mt-4">Meeting ID: {meetingId}</h1>
+    <div className="flex flex-col items-center p-4">
+      <h1 className="text-2xl font-bold mb-4">Meeting ID: {meetingId}</h1>
 
-      <video ref={localVideoRef} autoPlay playsInline muted className="w-64 h-40 bg-black m-2" />
+      <div className="flex gap-4 flex-wrap justify-center">
+        <video
+          ref={localVideoRef}
+          autoPlay
+          playsInline
+          muted
+          className="w-64 h-40 bg-black border-4 border-green-500 rounded-xl"
+        />
 
-      <div className="grid grid-cols-3 gap-4">
         {Object.entries(remoteVideos).map(([userId, stream]) => (
           <video
             key={userId}
             autoPlay
             playsInline
-            className="w-64 h-40 bg-black"
+            className="w-64 h-40 bg-black border-4 border-blue-500 rounded-xl"
             ref={(el) => {
               if (el && stream) el.srcObject = stream;
             }}
