@@ -12,7 +12,7 @@ export default function Dashboard() {
     try {
       const token = getAuthToken();
       const response = await axios.post(
-        `${process.env.backendURL}/api/meet/create-meeting`,
+        `https://videochatapp-backend-wx80.onrender.com/api/meet/create-meeting`,
         {},
         {
           headers: { Authorization: `Bearer ${token}` },
@@ -41,7 +41,7 @@ export default function Dashboard() {
     try {
       const token = getAuthToken();
       const response = await axios.post(
-        'http://localhost:3000/api/meet/join-meeting',
+        `https://videochatapp-backend-wx80.onrender.com/api/meet/join-meeting`,
         { meetingId },
         {
           headers: { Authorization: `Bearer ${token}` },

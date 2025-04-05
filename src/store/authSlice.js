@@ -13,7 +13,7 @@ export const loginUser = createAsyncThunk(
     "auth/loginUser", // Action type prefix
     async ({ username, password }, { rejectWithValue }) => {
       try {
-        const response = await axios.post(`${process.env.backendURL}/api/auth/login`, { username, password });
+        const response = await axios.post(`https://videochatapp-backend-wx80.onrender.com/api/auth/login`, { username, password });
   
         // Store the token in localStorage
         localStorage.setItem("token", response.data.token);
