@@ -37,9 +37,18 @@ export default function Dashboard() {
       alert('Please enter a valid meeting ID.');
       return;
     }
-
+  
+    const token = localStorage.getItem("token");
+  
+    if (!token) {
+      alert("Authentication token missing. Please log in again.");
+      navigate("/login"); // or redirect accordingly
+      return;
+    }
+  
+    console.log("Token before joining meeting:", token); // Debug line
+  
     try {
-      const token = localStorage.getItem("token");
       const response = await axios.post(
         `https://videochatapp-backend-wx80.onrender.com/api/meet/join-meeting`,
         { meetingId },
@@ -47,7 +56,7 @@ export default function Dashboard() {
           headers: { Authorization: `Bearer ${token}` },
         }
       );
-
+  
       if (response.data.success) {
         navigate(`/meeting/${meetingId}`);
       } else {
@@ -58,6 +67,7 @@ export default function Dashboard() {
       alert('Server error. Try again later.');
     }
   };
+  
 
   return (
     <div>
