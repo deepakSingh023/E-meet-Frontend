@@ -10,7 +10,7 @@ export default function Dashboard() {
 
   const createMeeting = async () => {
     try {
-      const token = getAuthToken();
+      const token = localStorage.getItem("token");
       const response = await axios.post(
         `https://videochatapp-backend-wx80.onrender.com/api/meet/create-meeting`,
         {},
@@ -39,7 +39,7 @@ export default function Dashboard() {
     }
 
     try {
-      const token = getAuthToken();
+      const token = localStorage.getItem("token");
       const response = await axios.post(
         `https://videochatapp-backend-wx80.onrender.com/api/meet/join-meeting`,
         { meetingId },
