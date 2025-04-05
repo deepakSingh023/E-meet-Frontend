@@ -13,15 +13,21 @@ export default function Meeting() {
   const [isVideoOn, setIsVideoOn] = useState(true);
 
   useEffect(() => {
+    const handleRemoteStream = (userId, stream) => {
+      setRemoteVideos((prev) => ({ ...prev, [userId]: stream }));
+    };
+
     const init = async () => {
       const stream = await getLocalStream();
       setLocalStream(stream);
-      localVideoRef.current.srcObject = stream;
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
 
       socket.emit("join-room", meetingId);
 
       socket.on("user-joined", async ({ userId }) => {
-        const pc = await createPeerConnection(socket, userId, handleRemoteStream);
+        const pc = await createPeerConnection(socket, userId, handleRemoteStream, stream);
         getPeers()[userId] = pc;
 
         const offer = await pc.createOffer();
@@ -31,7 +37,7 @@ export default function Meeting() {
       });
 
       socket.on("offer", async ({ sender, offer }) => {
-        const pc = await createPeerConnection(socket, sender, handleRemoteStream);
+        const pc = await createPeerConnection(socket, sender, handleRemoteStream, stream);
         getPeers()[sender] = pc;
 
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
@@ -43,17 +49,22 @@ export default function Meeting() {
 
       socket.on("answer", async ({ sender, answer }) => {
         const pc = getPeers()[sender];
-        if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer));
+        if (pc) {
+          await pc.setRemoteDescription(new RTCSessionDescription(answer));
+        }
       });
 
       socket.on("ice-candidate", ({ sender, candidate }) => {
         const pc = getPeers()[sender];
-        if (pc) pc.addIceCandidate(new RTCIceCandidate(candidate));
+        if (pc && candidate) {
+          pc.addIceCandidate(new RTCIceCandidate(candidate));
+        }
       });
 
       socket.on("user-left", ({ userId }) => {
-        if (getPeers()[userId]) {
-          getPeers()[userId].close();
+        const pc = getPeers()[userId];
+        if (pc) {
+          pc.close();
           delete getPeers()[userId];
           setRemoteVideos((prev) => {
             const updated = { ...prev };
@@ -62,10 +73,6 @@ export default function Meeting() {
           });
         }
       });
-    };
-
-    const handleRemoteStream = (userId, stream) => {
-      setRemoteVideos((prev) => ({ ...prev, [userId]: stream }));
     };
 
     init();
@@ -77,19 +84,19 @@ export default function Meeting() {
 
   const toggleMic = () => {
     if (localStream) {
-      localStream.getAudioTracks().forEach(track => {
+      localStream.getAudioTracks().forEach((track) => {
         track.enabled = !track.enabled;
       });
-      setIsMicOn(prev => !prev);
+      setIsMicOn((prev) => !prev);
     }
   };
 
   const toggleVideo = () => {
     if (localStream) {
-      localStream.getVideoTracks().forEach(track => {
+      localStream.getVideoTracks().forEach((track) => {
         track.enabled = !track.enabled;
       });
-      setIsVideoOn(prev => !prev);
+      setIsVideoOn((prev) => !prev);
     }
   };
 
@@ -97,11 +104,11 @@ export default function Meeting() {
     socket.emit("leave-room", meetingId);
     socket.disconnect();
 
-    Object.values(getPeers()).forEach(pc => pc.close());
+    Object.values(getPeers()).forEach((pc) => pc.close());
     for (const key in getPeers()) delete getPeers()[key];
 
     if (localStream) {
-      localStream.getTracks().forEach(track => track.stop());
+      localStream.getTracks().forEach((track) => track.stop());
     }
 
     navigate("/dashboard");
