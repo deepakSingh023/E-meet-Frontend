@@ -29,7 +29,7 @@ export const loginUser = createAsyncThunk(
     "auth/registerUser",
     async ({ username, password }, { rejectWithValue }) => {
       try {
-        const response = await axios.post(`${process.env.backendURL}/api/auth/register`, { username, password});
+        const response = await axios.post(`https://videochatapp-backend-wx80.onrender.com/api/auth/register`, { username, password});
         return response.data;
       } catch (error) {
         return rejectWithValue(error.response.data);
