@@ -112,7 +112,7 @@ export default function Meeting() {
   };
 
   const endCall = () => {
-    socket.emit("leave-room", meetingId);
+    socket.emit("leave-meeting", meetingId);
     socket.disconnect();
 
     Object.values(getPeers()).forEach((pc) => pc.close());
