@@ -13,9 +13,11 @@ export default function Meeting() {
   const [isVideoOn, setIsVideoOn] = useState(true);
 
   useEffect(() => {
-    const handleRemoteStream = (userId, stream) => {
-      console.log("🎥 Remote stream received from:", userId);
-      setRemoteVideos((prev) => ({ ...prev, [userId]: stream }));
+    let currentVideoCallId;
+
+    const handleRemoteStream = (videoCallId, stream) => {
+      console.log("🎥 Remote stream received from:", videoCallId);
+      setRemoteVideos((prev) => ({ ...prev, [videoCallId]: stream }));
     };
 
     const init = async () => {
@@ -25,37 +27,41 @@ export default function Meeting() {
         localVideoRef.current.srcObject = stream;
       }
 
-      socket.connect(); // Ensure reconnection
+      socket.connect();
+
       socket.emit("join-meeting", {
         meetingId,
         token: localStorage.getItem("token"),
       });
 
-      // Handle other users already in room
-      socket.on("existing-users", async ({ existingUsers }) => {
-        for (const otherId of existingUsers) {
-          const pc = await createPeerConnection(socket, otherId, handleRemoteStream, stream);
-          getPeers()[otherId] = pc;
+      socket.on("user-joined", async ({ userId, videoCallId, existingUsers }) => {
+        currentVideoCallId = videoCallId;
+
+        // If this user is joining, they get existing users
+        if (existingUsers && existingUsers.length > 0) {
+          for (const otherId of existingUsers) {
+            if (!getPeers()[otherId]) {
+              const pc = await createPeerConnection(socket, otherId, handleRemoteStream, stream);
+              getPeers()[otherId] = pc;
+
+              const offer = await pc.createOffer();
+              await pc.setLocalDescription(offer);
+              socket.emit("offer", { target: otherId, offer });
+            }
+          }
+        }
+
+        // If a new user joined after you
+        if (userId !== currentVideoCallId && !getPeers()[videoCallId]) {
+          const pc = await createPeerConnection(socket, videoCallId, handleRemoteStream, stream);
+          getPeers()[videoCallId] = pc;
 
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
-          socket.emit("offer", { target: otherId, offer });
+          socket.emit("offer", { target: videoCallId, offer });
         }
       });
 
-      // New user joined after you
-      socket.on("user-joined", async ({ userId, videoCallId }) => {
-        if (getPeers()[videoCallId]) return; // avoid duplicate connections
-
-        const pc = await createPeerConnection(socket, videoCallId, handleRemoteStream, stream);
-        getPeers()[videoCallId] = pc;
-
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        socket.emit("offer", { target: videoCallId, offer });
-      });
-
-      // Receive answer
       socket.on("answer", async ({ sender, answer }) => {
         const pc = getPeers()[sender];
         if (pc) {
@@ -63,7 +69,6 @@ export default function Meeting() {
         }
       });
 
-      // Receive ICE candidate
       socket.on("ice-candidate", ({ sender, candidate }) => {
         const pc = getPeers()[sender];
         if (pc && candidate) {
@@ -71,7 +76,6 @@ export default function Meeting() {
         }
       });
 
-      // Handle user leaving
       socket.on("user-left", ({ videoCallId }) => {
         const pc = getPeers()[videoCallId];
         if (pc) {
@@ -89,7 +93,23 @@ export default function Meeting() {
     init();
 
     return () => {
-      endCall();
+      socket.emit("leave-meeting", { meetingId });
+      socket.disconnect();
+
+      Object.values(getPeers()).forEach((pc) => pc.close());
+      for (const id in getPeers()) delete getPeers()[id];
+
+      if (localStream) {
+        localStream.getTracks().forEach((track) => track.stop());
+      }
+
+      // Remove all listeners to avoid duplicate events on reconnection
+      socket.off("user-joined");
+      socket.off("answer");
+      socket.off("ice-candidate");
+      socket.off("user-left");
+
+      navigate("/dashboard");
     };
   }, [meetingId]);
 
@@ -112,11 +132,11 @@ export default function Meeting() {
   };
 
   const endCall = () => {
-    socket.emit("leave-meeting", meetingId);
+    socket.emit("leave-meeting", { meetingId });
     socket.disconnect();
 
     Object.values(getPeers()).forEach((pc) => pc.close());
-    for (const key in getPeers()) delete getPeers()[key];
+    for (const id in getPeers()) delete getPeers()[id];
 
     if (localStream) {
       localStream.getTracks().forEach((track) => track.stop());
@@ -138,9 +158,9 @@ export default function Meeting() {
           className="w-64 h-40 bg-black border-4 border-green-500 rounded-xl"
         />
 
-        {Object.entries(remoteVideos).map(([userId, stream]) => (
+        {Object.entries(remoteVideos).map(([id, stream]) => (
           <video
-            key={userId}
+            key={id}
             autoPlay
             playsInline
             className="w-64 h-40 bg-black border-4 border-blue-500 rounded-xl"
