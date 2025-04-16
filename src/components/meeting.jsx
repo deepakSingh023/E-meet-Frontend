@@ -1,137 +1,135 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useSelector } from "react-redux";
-import { io } from "socket.io-client";
+import {
+  getLocalStream,
+  createPeerConnection,
+  getPeers,
+  removePeer,
+  closeAllPeers
+} from "../webrtc"; // adjust the path if needed
+import socket from "../sockets"; // your socket connection instance
 
-const meeting = () => {
-  const { id } = useParams();
+const Meeting = () => {
+  const { id: meetingId } = useParams();
   const { currentUser } = useSelector((state) => state.user);
   const localVideoRef = useRef(null);
 
   const [localStream, setLocalStream] = useState(null);
-  const [remoteVideos, setRemoteVideos] = useState({});
-  const peersRef = useRef({});
-  const socketRef = useRef();
+  const [remoteStreams, setRemoteStreams] = useState({});
 
   useEffect(() => {
-    socketRef.current = io("https://your-server-url", {
-      withCredentials: true,
-    });
+    if (!currentUser) return;
 
-    navigator.mediaDevices
-      .getUserMedia({ video: true, audio: true })
+    // 1. Get local stream
+    getLocalStream()
       .then((stream) => {
         setLocalStream(stream);
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
         }
 
-        socketRef.current.emit("join-meeting", {
-          meetingId: id,
+        // 2. Join the meeting
+        socket.emit("join-meeting", {
+          meetingId,
           videoCallId: currentUser.videoCallId,
         });
 
-        socketRef.current.on("all-users", (users) => {
-          users.forEach((user) => {
-            const pc = createPeerConnection(user.videoCallId);
-            peersRef.current[user.videoCallId] = pc;
+        // 3. Handle "all-users" event
+        socket.on("all-users", async (users) => {
+          for (const user of users) {
+            const pc = await createPeerConnection(
+              socket,
+              user.videoCallId,
+              handleRemoteStream,
+              stream
+            );
 
-            // Add local stream tracks
-            stream.getTracks().forEach((track) => {
-              pc.addTrack(track, stream);
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+
+            socket.emit("offer", {
+              target: user.videoCallId,
+              caller: currentUser.videoCallId,
+              sdp: offer,
             });
 
-            pc.createOffer().then((offer) => {
-              pc.setLocalDescription(offer);
-              socketRef.current.emit("offer", {
-                target: user.videoCallId,
-                caller: currentUser.videoCallId,
-                sdp: offer,
-              });
-            });
-          });
-        });
-
-        socketRef.current.on("offer", ({ caller, sdp }) => {
-          const pc = createPeerConnection(caller);
-          peersRef.current[caller] = pc;
-
-          stream.getTracks().forEach((track) => {
-            pc.addTrack(track, stream);
-          });
-
-          pc.setRemoteDescription(new RTCSessionDescription(sdp)).then(() => {
-            pc.createAnswer().then((answer) => {
-              pc.setLocalDescription(answer);
-              socketRef.current.emit("answer", {
-                target: caller,
-                sdp: answer,
-              });
-            });
-          });
-        });
-
-        socketRef.current.on("answer", ({ target, sdp }) => {
-          const pc = peersRef.current[target];
-          if (pc) {
-            pc.setRemoteDescription(new RTCSessionDescription(sdp));
+            getPeers()[user.videoCallId] = pc;
           }
         });
 
-        socketRef.current.on("ice-candidate", ({ target, candidate }) => {
-          const pc = peersRef.current[target];
+        // 4. Handle "offer"
+        socket.on("offer", async ({ caller, sdp }) => {
+          const pc = await createPeerConnection(
+            socket,
+            caller,
+            handleRemoteStream,
+            stream
+          );
+          getPeers()[caller] = pc;
+
+          await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+
+          socket.emit("answer", {
+            target: caller,
+            sdp: answer,
+          });
+        });
+
+        // 5. Handle "answer"
+        socket.on("answer", async ({ target, sdp }) => {
+          const pc = getPeers()[target];
+          if (pc) {
+            await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+          }
+        });
+
+        // 6. Handle "ice-candidate"
+        socket.on("ice-candidate", ({ target, candidate }) => {
+          const pc = getPeers()[target];
           if (pc && candidate) {
             pc.addIceCandidate(new RTCIceCandidate(candidate));
           }
         });
+
+      })
+      .catch((err) => {
+        console.error("Failed to get local stream", err);
       });
 
+    // Cleanup
     return () => {
-      socketRef.current.disconnect();
-      Object.values(peersRef.current).forEach((pc) => pc.close());
+      socket.emit("leave-meeting", { meetingId, videoCallId: currentUser.videoCallId });
+      closeAllPeers();
+      socket.off("all-users");
+      socket.off("offer");
+      socket.off("answer");
+      socket.off("ice-candidate");
     };
-  }, []);
+  }, [currentUser]);
 
-  const createPeerConnection = (remoteVideoCallId) => {
-    const pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: "stun:stun.l.google.com:19302" },
-        {
-          urls: "turn:relay1.expressturn.com:3478",
-          username: "ef43f3f6b0a14e398fec7ff66a1cfa7b",
-          credential: "5SfVzY9fPxX0Lmk2",
-        },
-      ],
-    });
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        socketRef.current.emit("ice-candidate", {
-          target: remoteVideoCallId,
-          candidate: event.candidate,
-        });
-      }
-    };
-
-    pc.ontrack = (event) => {
-      const remoteStream = event.streams[0];
-      console.log("Received remote stream", remoteVideoCallId, remoteStream);
-      setRemoteVideos((prev) => ({
-        ...prev,
-        [remoteVideoCallId]: remoteStream,
-      }));
-    };
-
-    return pc;
+  const handleRemoteStream = (peerId, stream) => {
+    setRemoteStreams((prev) => ({
+      ...prev,
+      [peerId]: stream,
+    }));
   };
 
   return (
     <div className="grid grid-cols-3 gap-4 p-4">
       <div className="col-span-1">
-        <video ref={localVideoRef} autoPlay muted playsInline className="w-full rounded-xl shadow-md" />
+        <video
+          ref={localVideoRef}
+          autoPlay
+          muted
+          playsInline
+          className="w-full rounded-xl shadow-md"
+        />
       </div>
-      {Object.entries(remoteVideos).map(([id, stream]) => (
-        <div key={id} className="col-span-1">
+      {Object.entries(remoteStreams).map(([peerId, stream]) => (
+        <div key={peerId} className="col-span-1">
           <video
             autoPlay
             playsInline
@@ -148,4 +146,4 @@ const meeting = () => {
   );
 };
 
-export default meeting;
+export default Meeting;
