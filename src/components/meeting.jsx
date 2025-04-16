@@ -10,9 +10,10 @@ import {
 } from "../webrtc"; // adjust the path if needed
 import socket from "../sockets"; // your socket connection instance
 
-const Meeting = () => {
+const meeting = () => {
   const { id: meetingId } = useParams();
-  const { currentUser } = useSelector((state) => state.user);
+  const currentUser = useSelector((state) => state.auth.user);
+
   const localVideoRef = useRef(null);
 
   const [localStream, setLocalStream] = useState(null);

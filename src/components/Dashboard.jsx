@@ -4,7 +4,7 @@ import axios from 'axios';
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [meetingId, setMeetingId] = useState('');
+  const [meetingId, setmeetingId] = useState('');
 
   const getAuthToken = () => localStorage.getItem("token");
 
