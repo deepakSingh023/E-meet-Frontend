@@ -147,4 +147,4 @@ const meeting = () => {
   );
 };
 
-export default Meeting;
+export default meeting;
