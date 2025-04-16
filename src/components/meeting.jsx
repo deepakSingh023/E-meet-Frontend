@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import { useSelector } from "react-redux";
 import { io } from "socket.io-client";
 
-const meetings = () => {
+const meeting = () => {
   const { id } = useParams();
   const { currentUser } = useSelector((state) => state.user);
   const localVideoRef = useRef(null);
@@ -148,4 +148,4 @@ const meetings = () => {
   );
 };
 
-export default MeetingRoom;
+export default meeting;
