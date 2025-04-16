@@ -6,7 +6,7 @@ import LoginPage from './components/Login';
 import Register from './components/Register';
 import Landing from './pages/landing';
 import Dashboard from './components/Dashboard';
-import Meeting from './components/meeting';
+import meeting from './components/meeting';
 
 const App = () => {
   const { user } = useSelector((state) => state.auth);

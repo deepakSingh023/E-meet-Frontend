@@ -94,7 +94,7 @@ export default function Dashboard() {
               type="text"
               placeholder="Enter Meeting ID"
               value={meetingId}
-              onChange={(e) => setMeetingId(e.target.value)}
+              onChange={(e) => setmeetingId(e.target.value)}
               className="px-4 py-2 border rounded-lg"
             />
             <button
