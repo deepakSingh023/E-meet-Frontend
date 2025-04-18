@@ -11,7 +11,6 @@ import {
 import socket from "../sockets"; // your socket connection instance
 
 export default function meeting() {
-  const { 
   const  meetingId  = useParams();
   const navigate = useNavigate();
   const currentUser = useSelector((state) => state.auth.user);
