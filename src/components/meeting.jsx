@@ -176,11 +176,10 @@ export default function meeting() {
           <div className="flex items-center mt-2">
             <p className="text-sm">Meeting ID: <span className="font-mono">{meetingId?.id}</span></p>
             <button 
-              onClick={copyMeetingId}
-              className="ml-2 bg-blue-600 hover:bg-blue-700 text-white text-xs px-2 py-1 rounded"
-            >
-              Copy
+              onClick={copyMeetingId} className="ml-2 bg-blue-600 hover:bg-blue-700 text-white text-xs px-2 py-1 rounded"
+            >{copied ? "Copied!" : "Copy"}
             </button>
+
           </div>
         </div>
         <button 
