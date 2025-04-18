@@ -1,4 +1,3 @@
-// webrtc.js
 const peerConnectionConfig = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -38,10 +37,9 @@ export const getLocalStream = async (constraints = { audio: true, video: true })
  */
 export const createPeerConnection = async (socket, remotePeerId, onStreamCallback, localStream) => {
   try {
-    // Create a new peer connection
     const peerConnection = new RTCPeerConnection(peerConnectionConfig);
-    
-    // Add all local tracks to the peer connection
+
+    // Add local stream tracks
     if (localStream) {
       localStream.getTracks().forEach(track => {
         peerConnection.addTrack(track, localStream);
@@ -49,7 +47,7 @@ export const createPeerConnection = async (socket, remotePeerId, onStreamCallbac
       console.log(`Added ${localStream.getTracks().length} local tracks to connection with ${remotePeerId}`);
     }
 
-    // Handle ICE candidates
+    // ICE candidate handling
     peerConnection.onicecandidate = ({ candidate }) => {
       if (candidate) {
         console.log(`Sending ICE candidate to ${remotePeerId}`);
@@ -60,12 +58,11 @@ export const createPeerConnection = async (socket, remotePeerId, onStreamCallbac
       }
     };
 
-    // Handle connection state changes
+    // Connection state changes
     peerConnection.onconnectionstatechange = () => {
-      console.log(`Connection state with ${remotePeerId} changed to: ${peerConnection.connectionState}`);
-      
-      // Clean up failed connections
-      if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'closed') {
+      const state = peerConnection.connectionState;
+      console.log(`Connection state with ${remotePeerId} changed to: ${state}`);
+      if (state === 'failed' || state === 'disconnected' || state === 'closed') {
         if (peers[remotePeerId]) {
           peerConnection.close();
           delete peers[remotePeerId];
@@ -74,24 +71,26 @@ export const createPeerConnection = async (socket, remotePeerId, onStreamCallbac
       }
     };
 
-    // Handle ICE connection state changes
+    // ICE connection state changes
     peerConnection.oniceconnectionstatechange = () => {
       console.log(`ICE connection state with ${remotePeerId} changed to: ${peerConnection.iceConnectionState}`);
     };
 
-    // Handle receiving remote tracks
+    // Handle remote stream
     peerConnection.ontrack = (event) => {
       console.log(`Received tracks from ${remotePeerId}`);
       const remoteStream = event.streams[0];
-      if (remoteStream) {
+      if (remoteStream && onStreamCallback) {
         onStreamCallback(remotePeerId, remoteStream);
       }
     };
 
-    // Log negotiation needed events
     peerConnection.onnegotiationneeded = () => {
       console.log(`Negotiation needed for connection with ${remotePeerId}`);
     };
+
+    // ✅ Store the peer connection immediately
+    peers[remotePeerId] = peerConnection;
 
     return peerConnection;
   } catch (error) {
@@ -136,10 +135,8 @@ export const closeAllPeers = () => {
  * @param {MediaStream} newStream - New media stream to use
  */
 export const updateLocalStream = (newStream) => {
-  // Replace tracks in all peer connections
   Object.values(peers).forEach(pc => {
     const senders = pc.getSenders();
-    
     newStream.getTracks().forEach(track => {
       const sender = senders.find(s => s.track && s.track.kind === track.kind);
       if (sender) {
@@ -147,7 +144,6 @@ export const updateLocalStream = (newStream) => {
       }
     });
   });
-  
   console.log('Local stream updated in all peer connections');
 };
 
@@ -170,7 +166,7 @@ export const getScreenShareStream = async () => {
 };
 
 /**
- * Helper function to restart an ICE connection
+ * Restart ICE connection for a specific peer
  * @param {string} peerId - ID of the peer to restart connection with
  */
 export const restartIceForPeer = async (peerId) => {

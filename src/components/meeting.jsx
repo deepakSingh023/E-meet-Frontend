@@ -25,25 +25,23 @@ export default function Meeting() {
   useEffect(() => {
     if (!currentUser) return;
 
-    // 1. Get local stream
+    let mounted = true;
+
     getLocalStream()
       .then((stream) => {
+        if (!mounted) return;
         setLocalStream(stream);
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
         }
 
-        // 2. Join the meeting
         socket.emit("join-meeting", {
           meetingId,
-          token: localStorage.getItem("token"), // Add token for authentication
+          token: localStorage.getItem("token"),
         });
 
-        // 3. Handle "user-joined" event that includes existingUsers
         socket.on("user-joined", async ({ existingUsers, videoCallId }) => {
-          if (existingUsers && existingUsers.length > 0) {
-            console.log("Existing users in the meeting:", existingUsers);
-            // Create connections with existing users in the meeting
+          if (existingUsers?.length) {
             for (const remoteVideoCallId of existingUsers) {
               const pc = await createPeerConnection(
                 socket,
@@ -51,24 +49,18 @@ export default function Meeting() {
                 handleRemoteStream,
                 stream
               );
-
-              // Create and send offer
               const offer = await pc.createOffer();
               await pc.setLocalDescription(offer);
-
               socket.emit("offer", {
                 target: remoteVideoCallId,
                 offer: offer
               });
-
               getPeers()[remoteVideoCallId] = pc;
             }
           }
         });
 
-        // 4. Handle "offer"
         socket.on("offer", async ({ sender, offer }) => {
-          console.log(`Received offer from ${sender}`);
           const pc = await createPeerConnection(
             socket,
             sender,
@@ -76,58 +68,46 @@ export default function Meeting() {
             stream
           );
           getPeers()[sender] = pc;
-
           await pc.setRemoteDescription(new RTCSessionDescription(offer));
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
-
-          socket.emit("answer", {
-            target: sender,
-            answer: answer
-          });
+          socket.emit("answer", { target: sender, answer });
         });
 
-        // 5. Handle "answer"
         socket.on("answer", async ({ sender, answer }) => {
-          console.log(`Received answer from ${sender}`);
           const pc = getPeers()[sender];
-          if (pc) {
-            await pc.setRemoteDescription(new RTCSessionDescription(answer));
-          }
+          if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer));
         });
 
-        // 6. Handle "ice-candidate"
         socket.on("ice-candidate", async ({ sender, candidate }) => {
-          console.log(`Received ICE candidate from ${sender}`);
           const pc = getPeers()[sender];
           if (pc && candidate) {
-            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+            try {
+              await pc.addIceCandidate(new RTCIceCandidate(candidate));
+            } catch (err) {
+              console.error("Error adding ICE candidate", err);
+            }
           }
         });
 
-        // 7. Handle "user-left"
         socket.on("user-left", ({ videoCallId }) => {
-          console.log(`User left: ${videoCallId}`);
           setRemoteStreams((prev) => {
-            const newStreams = { ...prev };
-            delete newStreams[videoCallId];
-            return newStreams;
+            const updated = { ...prev };
+            delete updated[videoCallId];
+            return updated;
           });
           removePeer(videoCallId);
         });
       })
-      .catch((err) => {
-        console.error("Failed to get local stream", err);
-      });
+      .catch((err) => console.error("Failed to get local stream", err));
 
-    // Cleanup
     return () => {
+      mounted = false;
       leaveMeeting();
     };
   }, [currentUser, meetingId]);
 
   const handleRemoteStream = (peerId, stream) => {
-    console.log(`Got remote stream from: ${peerId}`);
     setRemoteStreams((prev) => ({
       ...prev,
       [peerId]: stream,
@@ -136,18 +116,14 @@ export default function Meeting() {
 
   const toggleAudio = () => {
     if (localStream) {
-      localStream.getAudioTracks().forEach(track => {
-        track.enabled = !track.enabled;
-      });
+      localStream.getAudioTracks().forEach(track => (track.enabled = !track.enabled));
       setIsAudioEnabled(!isAudioEnabled);
     }
   };
 
   const toggleVideo = () => {
     if (localStream) {
-      localStream.getVideoTracks().forEach(track => {
-        track.enabled = !track.enabled;
-      });
+      localStream.getVideoTracks().forEach(track => (track.enabled = !track.enabled));
       setIsVideoEnabled(!isVideoEnabled);
     }
   };
@@ -156,19 +132,19 @@ export default function Meeting() {
     if (currentUser && meetingId) {
       socket.emit("leave-meeting", { meetingId });
     }
-    
+
     if (localStream) {
       localStream.getTracks().forEach(track => track.stop());
     }
-    
+
     closeAllPeers();
     socket.off("user-joined");
     socket.off("offer");
     socket.off("answer");
     socket.off("ice-candidate");
     socket.off("user-left");
-    
-    navigate("/dashboard"); // Adjust this to your application's route structure
+
+    navigate("/dashboard");
   };
 
   const copyMeetingId = () => {
@@ -177,30 +153,24 @@ export default function Meeting() {
   };
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Meeting Info */}
+    <div className="flex flex-col min-h-screen">
       <div className="bg-gray-800 text-white p-4 flex justify-between items-center">
         <div>
           <h2 className="text-xl font-semibold">Meeting in progress</h2>
           <div className="flex items-center mt-2">
             <p className="text-sm">Meeting ID: <span className="font-mono">{meetingId}</span></p>
-            <button 
-              onClick={copyMeetingId} className="ml-2 bg-blue-600 hover:bg-blue-700 text-white text-xs px-2 py-1 rounded"
-            > copy
+            <button onClick={copyMeetingId} className="ml-2 bg-blue-600 hover:bg-blue-700 text-white text-xs px-2 py-1 rounded">
+              copy
             </button>
           </div>
         </div>
-        <button 
-          onClick={leaveMeeting}
-          className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-md font-medium"
-        >
+        <button onClick={leaveMeeting} className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-md font-medium">
           Leave Meeting
         </button>
       </div>
 
-      {/* Videos Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4 flex-grow">
-        <div className="relative">
+        <div className="relative w-full h-64">
           <video
             ref={localVideoRef}
             autoPlay
@@ -212,16 +182,14 @@ export default function Meeting() {
             You (Local)
           </p>
         </div>
-        
+
         {Object.entries(remoteStreams).map(([peerId, stream]) => (
-          <div key={peerId} className="relative">
+          <div key={peerId} className="relative w-full h-64">
             <video
               autoPlay
               playsInline
               ref={(el) => {
-                if (el) {
-                  el.srcObject = stream;
-                }
+                if (el) el.srcObject = stream;
               }}
               className="w-full h-full rounded-xl shadow-md object-cover"
             />
@@ -232,7 +200,6 @@ export default function Meeting() {
         ))}
       </div>
 
-      {/* Controls */}
       <div className="bg-gray-800 p-4 flex justify-center space-x-4">
         <button
           onClick={toggleAudio}
