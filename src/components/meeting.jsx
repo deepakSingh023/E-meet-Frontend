@@ -177,7 +177,7 @@ export default function meeting() {
             <p className="text-sm">Meeting ID: <span className="font-mono">{meetingId?.id}</span></p>
             <button 
               onClick={copyMeetingId} className="ml-2 bg-blue-600 hover:bg-blue-700 text-white text-xs px-2 py-1 rounded"
-            >{copied ? "Copied!" : "Copy"}
+            > copy
             </button>
 
           </div>
