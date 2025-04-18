@@ -10,7 +10,7 @@ import {
 } from "../webrtc"; // adjust the path if needed
 import socket from "../sockets"; // your socket connection instance
 
-export default function meeting() {
+export default function Meeting() {
   const { id: meetingId } = useParams();
   const navigate = useNavigate();
   const currentUser = useSelector((state) => state.auth.user);
@@ -36,70 +36,78 @@ export default function meeting() {
         // 2. Join the meeting
         socket.emit("join-meeting", {
           meetingId,
-          videoCallId: currentUser.videoCallId,
+          token: localStorage.getItem("token"), // Add token for authentication
         });
 
-        // 3. Handle "all-users" event
-        socket.on("all-users", async (users) => {
-          for (const user of users) {
-            const pc = await createPeerConnection(
-              socket,
-              user.videoCallId,
-              handleRemoteStream,
-              stream
-            );
+        // 3. Handle "user-joined" event that includes existingUsers
+        socket.on("user-joined", async ({ existingUsers, videoCallId }) => {
+          if (existingUsers && existingUsers.length > 0) {
+            console.log("Existing users in the meeting:", existingUsers);
+            // Create connections with existing users in the meeting
+            for (const remoteVideoCallId of existingUsers) {
+              const pc = await createPeerConnection(
+                socket,
+                remoteVideoCallId,
+                handleRemoteStream,
+                stream
+              );
 
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
+              // Create and send offer
+              const offer = await pc.createOffer();
+              await pc.setLocalDescription(offer);
 
-            socket.emit("offer", {
-              target: user.videoCallId,
-              caller: currentUser.videoCallId,
-              sdp: offer,
-            });
+              socket.emit("offer", {
+                target: remoteVideoCallId,
+                offer: offer
+              });
 
-            getPeers()[user.videoCallId] = pc;
+              getPeers()[remoteVideoCallId] = pc;
+            }
           }
         });
 
         // 4. Handle "offer"
-        socket.on("offer", async ({ caller, sdp }) => {
+        socket.on("offer", async ({ sender, offer }) => {
+          console.log(`Received offer from ${sender}`);
           const pc = await createPeerConnection(
             socket,
-            caller,
+            sender,
             handleRemoteStream,
             stream
           );
-          getPeers()[caller] = pc;
+          getPeers()[sender] = pc;
 
-          await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+          await pc.setRemoteDescription(new RTCSessionDescription(offer));
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
 
           socket.emit("answer", {
-            target: caller,
-            sdp: answer,
+            target: sender,
+            answer: answer
           });
         });
 
         // 5. Handle "answer"
-        socket.on("answer", async ({ target, sdp }) => {
-          const pc = getPeers()[target];
+        socket.on("answer", async ({ sender, answer }) => {
+          console.log(`Received answer from ${sender}`);
+          const pc = getPeers()[sender];
           if (pc) {
-            await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+            await pc.setRemoteDescription(new RTCSessionDescription(answer));
           }
         });
 
         // 6. Handle "ice-candidate"
-        socket.on("ice-candidate", ({ target, candidate }) => {
-          const pc = getPeers()[target];
+        socket.on("ice-candidate", async ({ sender, candidate }) => {
+          console.log(`Received ICE candidate from ${sender}`);
+          const pc = getPeers()[sender];
           if (pc && candidate) {
-            pc.addIceCandidate(new RTCIceCandidate(candidate));
+            await pc.addIceCandidate(new RTCIceCandidate(candidate));
           }
         });
 
         // 7. Handle "user-left"
         socket.on("user-left", ({ videoCallId }) => {
+          console.log(`User left: ${videoCallId}`);
           setRemoteStreams((prev) => {
             const newStreams = { ...prev };
             delete newStreams[videoCallId];
@@ -119,6 +127,7 @@ export default function meeting() {
   }, [currentUser, meetingId]);
 
   const handleRemoteStream = (peerId, stream) => {
+    console.log(`Got remote stream from: ${peerId}`);
     setRemoteStreams((prev) => ({
       ...prev,
       [peerId]: stream,
@@ -145,7 +154,7 @@ export default function meeting() {
 
   const leaveMeeting = () => {
     if (currentUser && meetingId) {
-      socket.emit("leave-meeting", { meetingId, videoCallId: currentUser.videoCallId });
+      socket.emit("leave-meeting", { meetingId });
     }
     
     if (localStream) {
@@ -153,7 +162,7 @@ export default function meeting() {
     }
     
     closeAllPeers();
-    socket.off("all-users");
+    socket.off("user-joined");
     socket.off("offer");
     socket.off("answer");
     socket.off("ice-candidate");
@@ -174,12 +183,11 @@ export default function meeting() {
         <div>
           <h2 className="text-xl font-semibold">Meeting in progress</h2>
           <div className="flex items-center mt-2">
-            <p className="text-sm">Meeting ID: <span className="font-mono">{meetingId?.id}</span></p>
+            <p className="text-sm">Meeting ID: <span className="font-mono">{meetingId}</span></p>
             <button 
               onClick={copyMeetingId} className="ml-2 bg-blue-600 hover:bg-blue-700 text-white text-xs px-2 py-1 rounded"
             > copy
             </button>
-
           </div>
         </div>
         <button 
@@ -245,5 +253,4 @@ export default function meeting() {
       </div>
     </div>
   );
-};
-
+}
