@@ -16,6 +16,7 @@ export default function Meeting() {
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const [participantCount, setParticipantCount] = useState(1);
   const peersRef = useRef({});
+  const [videoCallId, setVideoCallId] = useState(null);
 
   useEffect(() => {
     if (!currentUser) {
@@ -27,6 +28,14 @@ export default function Meeting() {
 
     const initializeMeeting = async () => {
       try {
+        // First authenticate with socket if not already done
+        if (!socket.connected) {
+          await new Promise((resolve) => {
+            socket.once('connect', resolve);
+            socket.connect();
+          });
+        }
+
         // Get local media stream
         const stream = await getLocalStream();
         if (!mounted) return;
@@ -39,9 +48,6 @@ export default function Meeting() {
         // Join the meeting room
         socket.emit("join-meeting", { meetingId });
 
-        // Setup socket event handlers
-        setupSocketHandlers(stream);
-
       } catch (err) {
         console.error("Failed to initialize meeting:", err);
         alert("Could not access camera/microphone. Please check permissions.");
@@ -49,37 +55,46 @@ export default function Meeting() {
       }
     };
 
-    const setupSocketHandlers = (stream) => {
-      // Handle new participants joining
-      socket.on("user-joined", async ({ userId, existingUsers }) => {
-        console.log(`User ${userId} joined the meeting`);
+    const setupSocketHandlers = () => {
+      // Handle successful meeting join
+      socket.on("meeting-joined", ({ yourId, existingUsers }) => {
+        setVideoCallId(yourId);
         
-        // Create peer connection for each existing user
+        // Create peer connections for existing participants
         if (existingUsers && existingUsers.length > 0) {
-          for (const existingUserId of existingUsers) {
-            await createPeerForUser(existingUserId, stream);
-          }
+          existingUsers.forEach(async ({ userId }) => {
+            await createPeerForUser(userId);
+          });
         }
-        
+      });
+
+      // Handle new participants joining
+      socket.on("user-joined", ({ userId }) => {
+        console.log(`User ${userId} joined the meeting`);
         setParticipantCount(prev => prev + 1);
+        
+        // Create peer connection for new participant
+        createPeerForUser(userId);
       });
 
       // Handle incoming offers
       socket.on("offer", async ({ sender, offer }) => {
         console.log("Received offer from:", sender);
-        const pc = await createPeerConnection(
-          sender,
-          stream,
-          (remoteStream) => handleRemoteStream(sender, remoteStream)
-        );
-        
-        peersRef.current[sender] = pc;
-        await pc.setRemoteDescription(new RTCSessionDescription(offer));
-        
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        
-        socket.emit("answer", { target: sender, answer });
+        if (!peersRef.current[sender] && localStream) {
+          const pc = await createPeerConnection(
+            sender,
+            localStream,
+            (remoteStream) => handleRemoteStream(sender, remoteStream)
+          );
+          
+          peersRef.current[sender] = pc;
+          await pc.setRemoteDescription(new RTCSessionDescription(offer));
+          
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          
+          socket.emit("answer", { target: sender, answer });
+        }
       });
 
       // Handle incoming answers
@@ -117,12 +132,12 @@ export default function Meeting() {
       });
     };
 
-    const createPeerForUser = async (userId, stream) => {
-      if (peersRef.current[userId]) return; // Already connected
+    const createPeerForUser = async (userId) => {
+      if (!localStream || peersRef.current[userId]) return;
       
       const pc = await createPeerConnection(
         userId,
-        stream,
+        localStream,
         (remoteStream) => handleRemoteStream(userId, remoteStream)
       );
       
@@ -138,6 +153,7 @@ export default function Meeting() {
     };
 
     initializeMeeting();
+    setupSocketHandlers();
 
     return () => {
       mounted = false;
@@ -195,6 +211,7 @@ export default function Meeting() {
     socket.emit("leave-meeting", { meetingId });
     
     // Remove socket listeners
+    socket.off("meeting-joined");
     socket.off("user-joined");
     socket.off("offer");
     socket.off("answer");
