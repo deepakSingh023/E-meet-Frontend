@@ -21,6 +21,11 @@ const configuration = {
 const Meeting = () => {
   const { roomId } = useParams();
   const user = useSelector((state) => state.auth.user);
+  
+  // Debug URL params
+  console.log("URL params:", useParams());
+  console.log("Extracted roomId:", roomId);
+  console.log("Current URL:", window.location.href);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const peerConnection = useRef(null);
@@ -33,11 +38,13 @@ const Meeting = () => {
 
   useEffect(() => {
     console.log("Meeting component - roomId:", roomId);
+    console.log("Meeting component - roomId type:", typeof roomId);
     console.log("Meeting component - user:", user);
     console.log("Meeting component - user.username:", user?.username);
 
-    if (!roomId) {
-      setError("Missing room ID");
+    if (!roomId || roomId.trim() === '') {
+      setError("Missing room ID - please check the URL");
+      console.error("Room ID is missing or empty:", roomId);
       return;
     }
 

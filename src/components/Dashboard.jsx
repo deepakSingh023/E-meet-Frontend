@@ -30,8 +30,10 @@ const Dashboard = () => {
       await createRoom(roomId);
       console.log("Room created successfully, navigating to:", `/meeting/${roomId}`);
       
-      // Navigate to meeting
-      navigate(`/meeting/${roomId}`);
+      // Add a small delay to ensure room is created
+      setTimeout(() => {
+        navigate(`/meeting/${roomId}`);
+      }, 100);
     } catch (err) {
       console.error("Error creating meeting:", err);
       alert("Couldn't create meeting. Try again.");
