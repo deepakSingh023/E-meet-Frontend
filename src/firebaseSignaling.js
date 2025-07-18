@@ -1,3 +1,4 @@
+// firebaseSignaling.js
 import {
   doc,
   setDoc,
@@ -5,10 +6,10 @@ import {
   collection,
   addDoc,
   onSnapshot,
-  deleteDoc,
 } from "firebase/firestore";
 import { db } from "./firebase";
 
+// Create a room
 export const createRoom = async (roomId) => {
   const roomRef = doc(db, "rooms", roomId);
   const existing = await getDoc(roomRef);
@@ -21,44 +22,62 @@ export const createRoom = async (roomId) => {
   return { roomRef, isInitiator: false };
 };
 
-export const listenToRemoteCandidates = (roomId, peerId, callback) => {
-  return onSnapshot(
-    collection(db, `rooms/${roomId}/candidates/${peerId}/remote`),
-    (snapshot) => {
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === "added") {
-          callback(change.doc.data().candidate);
-        }
-      });
-    }
-  );
+// Send Offer
+export const sendOffer = async (roomId, senderId, offer) => {
+  const offerRef = doc(db, `rooms/${roomId}/offers/${senderId}`);
+  await setDoc(offerRef, { sender: senderId, offer });
 };
 
-export const sendIceCandidate = async (roomId, localId, candidate) => {
-  const candidatesRef = collection(db, `rooms/${roomId}/candidates/${localId}/remote`);
-  await addDoc(candidatesRef, { candidate });
-};
-
-export const saveOffer = async (roomId, fromId, offer) => {
-  await setDoc(doc(db, `rooms/${roomId}/offers/${fromId}`), { offer });
-};
-
-export const listenForOffer = (roomId, userId, callback) => {
-  return onSnapshot(doc(db, `rooms/${roomId}/offers/${userId}`), (docSnap) => {
+// Listen for Offer
+export const listenForOffer = (roomId, remoteId, callback) => {
+  const offerRef = doc(db, `rooms/${roomId}/offers/${remoteId}`);
+  return onSnapshot(offerRef, (docSnap) => {
     if (docSnap.exists()) {
-      callback(docSnap.data().offer);
+      const data = docSnap.data();
+      callback(data.offer);
     }
   });
 };
 
-export const saveAnswer = async (roomId, toId, answer) => {
-  await setDoc(doc(db, `rooms/${roomId}/answers/${toId}`), { answer });
+// Send Answer
+export const sendAnswer = async (roomId, senderId, answer) => {
+  const answerRef = doc(db, `rooms/${roomId}/answers/${senderId}`);
+  await setDoc(answerRef, { sender: senderId, answer });
 };
 
-export const listenForAnswer = (roomId, peerId, callback) => {
-  return onSnapshot(doc(db, `rooms/${roomId}/answers/${peerId}`), (docSnap) => {
+// Listen for Answer
+export const listenForAnswer = (roomId, remoteId, callback) => {
+  const answerRef = doc(db, `rooms/${roomId}/answers/${remoteId}`);
+  return onSnapshot(answerRef, (docSnap) => {
     if (docSnap.exists()) {
-      callback(docSnap.data().answer);
+      const data = docSnap.data();
+      callback(data.answer);
     }
+  });
+};
+
+// Send ICE Candidate
+export const sendCandidate = async (roomId, senderId, candidate) => {
+  const candidateRef = collection(db, `rooms/${roomId}/candidates`);
+  await addDoc(candidateRef, {
+    sender: senderId,
+    type: "candidate",
+    candidate,
+    created: Date.now(),
+  });
+};
+
+// Listen for Remote ICE Candidates
+export const listenForCandidates = (roomId, myId, callback) => {
+  const candidatesRef = collection(db, `rooms/${roomId}/candidates`);
+  return onSnapshot(candidatesRef, (snapshot) => {
+    snapshot.docChanges().forEach((change) => {
+      if (change.type === "added") {
+        const data = change.doc.data();
+        if (data.sender !== myId && data.type === "candidate") {
+          callback(data.candidate);
+        }
+      }
+    });
   });
 };

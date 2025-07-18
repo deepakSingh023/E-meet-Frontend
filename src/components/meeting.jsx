@@ -1,106 +1,123 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   createRoom,
-  saveOffer,
+  sendOffer,
   listenForOffer,
-  saveAnswer,
+  sendAnswer,
   listenForAnswer,
-  sendIceCandidate,
-  listenToRemoteCandidates,
-} from "../firebaseSignaling"; // Your signaling code
-import { useParams } from "react-router-dom"; // Assuming you're using react-router
+  sendCandidate,
+  listenForCandidates,
+} from "../firebaseSignaling"; // Updated signaling code
+import { useParams } from "react-router-dom";
 import { useSelector } from "react-redux";
 
 const configuration = {
-  iceServers: [
-    { urls: "stun:stun.l.google.com:19302" },
-    // Optional: Add TURN server here for production
-  ],
+  iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
 };
 
 const Meeting = () => {
   const { roomId } = useParams();
   const user = useSelector((state) => state.auth.user);
-  const localVideoRef = useRef();
-  const remoteVideoRef = useRef();
-  const peerConnection = useRef();
-  const localStream = useRef();
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+  const peerConnection = useRef(null);
+  const localStream = useRef(null);
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     if (!roomId || !user) return;
 
     const init = async () => {
-      peerConnection.current = new RTCPeerConnection(configuration);
+      try {
+        peerConnection.current = new RTCPeerConnection(configuration);
 
-      // Get user media
-      localStream.current = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
-      });
+        // Get media
+        localStream.current = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true,
+        });
 
-      localStream.current.getTracks().forEach((track) => {
-        peerConnection.current.addTrack(track, localStream.current);
-      });
+        // Show self view
+        localVideoRef.current.srcObject = localStream.current;
 
-      localVideoRef.current.srcObject = localStream.current;
+        // Add tracks to peer
+        localStream.current.getTracks().forEach((track) => {
+          peerConnection.current.addTrack(track, localStream.current);
+        });
 
-      // Show remote video
-      peerConnection.current.ontrack = (event) => {
-        const [remoteStream] = event.streams;
+        // Receive remote stream
+        const remoteStream = new MediaStream();
         remoteVideoRef.current.srcObject = remoteStream;
-      };
 
-      // ICE Candidate sending
-      peerConnection.current.onicecandidate = (event) => {
-        if (event.candidate) {
-          sendIceCandidate(roomId, user.uid, event.candidate);
+        peerConnection.current.ontrack = (event) => {
+          event.streams[0].getTracks().forEach((track) => {
+            remoteStream.addTrack(track);
+          });
+        };
+
+        // Handle ICE candidates
+        peerConnection.current.onicecandidate = (event) => {
+          if (event.candidate) {
+            sendCandidate(roomId, user.uid, event.candidate);
+          }
+        };
+
+        // Firestore listeners
+        const unsubOffer = listenForOffer(roomId, user.uid, async (offer) => {
+          if (offer) {
+            await peerConnection.current.setRemoteDescription(
+              new RTCSessionDescription(offer)
+            );
+            const answer = await peerConnection.current.createAnswer();
+            await peerConnection.current.setLocalDescription(answer);
+            await sendAnswer(roomId, user.uid, answer);
+          }
+        });
+
+        const unsubAnswer = listenForAnswer(roomId, user.uid, async (answer) => {
+          if (answer) {
+            await peerConnection.current.setRemoteDescription(
+              new RTCSessionDescription(answer)
+            );
+          }
+        });
+
+        const unsubCandidates = listenForCandidates(
+          roomId,
+          user.uid,
+          async (candidate) => {
+            try {
+              await peerConnection.current.addIceCandidate(
+                new RTCIceCandidate(candidate)
+              );
+            } catch (err) {
+              console.error("Error adding remote ICE candidate:", err);
+            }
+          }
+        );
+
+        // Are we initiator?
+        const { isInitiator } = await createRoom(roomId);
+
+        if (isInitiator) {
+          const offer = await peerConnection.current.createOffer();
+          await peerConnection.current.setLocalDescription(offer);
+          await sendOffer(roomId, user.uid, offer);
         }
-      };
 
-      // Step 1: Check if this user is the first to join
-      const offerListener = listenForOffer(roomId, user.uid, async (offer) => {
-        if (offer) {
-          await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
-          const answer = await peerConnection.current.createAnswer();
-          await peerConnection.current.setLocalDescription(answer);
-          await saveAnswer(roomId, user.uid, answer);
-        }
-      });
+        setConnected(true);
 
-      const answerListener = listenForAnswer(roomId, user.uid, async (answer) => {
-        if (answer) {
-          await peerConnection.current.setRemoteDescription(new RTCSessionDescription(answer));
-        }
-      });
-
-      const remoteCandidateUnsub = listenToRemoteCandidates(roomId, user.uid, async (candidate) => {
-        try {
-          await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (err) {
-          console.error("Failed to add remote candidate", err);
-        }
-      });
-
-      // Step 2: Determine if user is initiator or joiner
-      const { isInitiator } = await createRoom(roomId);
-
-if (isInitiator) {
-  const offer = await peerConnection.current.createOffer();
-  await peerConnection.current.setLocalDescription(offer);
-  await saveOffer(roomId, user.uid, offer);
-}
-
-      setConnected(true);
-
-      // Cleanup
-      return () => {
-        offerListener();
-        answerListener();
-        remoteCandidateUnsub();
-        peerConnection.current.close();
-        localStream.current.getTracks().forEach((t) => t.stop());
-      };
+        // Cleanup
+        return () => {
+          unsubOffer();
+          unsubAnswer();
+          unsubCandidates();
+          peerConnection.current?.close();
+          localStream.current?.getTracks().forEach((t) => t.stop());
+        };
+      } catch (err) {
+        console.error("Error initializing meeting:", err);
+      }
     };
 
     init();
@@ -114,11 +131,22 @@ if (isInitiator) {
       <div className="flex gap-6 justify-center items-center">
         <div>
           <h3 className="text-center text-sm font-semibold text-gray-700">You</h3>
-          <video ref={localVideoRef} autoPlay playsInline muted className="w-64 h-48 rounded-lg border" />
+          <video
+            ref={localVideoRef}
+            autoPlay
+            playsInline
+            muted
+            className="w-64 h-48 rounded-lg border"
+          />
         </div>
         <div>
           <h3 className="text-center text-sm font-semibold text-gray-700">Peer</h3>
-          <video ref={remoteVideoRef} autoPlay playsInline className="w-64 h-48 rounded-lg border" />
+          <video
+            ref={remoteVideoRef}
+            autoPlay
+            playsInline
+            className="w-64 h-48 rounded-lg border"
+          />
         </div>
       </div>
       {!connected && <p className="mt-6 text-gray-600">Connecting...</p>}
