@@ -2,7 +2,7 @@
 import React from "react";
 import { useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
-import { createRoom } from "../webrtc"; // your function to create a room
+import { createRoom } from "../firebaseSignaling"; // your function to create a room
 
 const Dashboard = () => {
   const navigate = useNavigate();
