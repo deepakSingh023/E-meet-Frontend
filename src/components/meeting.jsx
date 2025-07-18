@@ -21,203 +21,98 @@ const configuration = {
 const Meeting = () => {
   const { roomId } = useParams();
   const user = useSelector((state) => state.auth.user);
-  
-  // Debug URL params
-  console.log("URL params:", useParams());
-  console.log("Extracted roomId:", roomId);
-  console.log("Current URL:", window.location.href);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const peerConnection = useRef(null);
   const localStream = useRef(null);
+  const remoteStream = useRef(new MediaStream());
   const [connected, setConnected] = useState(false);
-  const [localVideoReady, setLocalVideoReady] = useState(false);
-  const [remoteVideoReady, setRemoteVideoReady] = useState(false);
-  const [error, setError] = useState(null);
   const [status, setStatus] = useState("Initializing...");
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    console.log("Meeting component - roomId:", roomId);
-    console.log("Meeting component - roomId type:", typeof roomId);
-    console.log("Meeting component - user:", user);
-    console.log("Meeting component - user.username:", user?.username);
-
-    if (!roomId || roomId.trim() === '') {
-      setError("Missing room ID - please check the URL");
-      console.error("Room ID is missing or empty:", roomId);
+    if (!roomId || !user?.username) {
+      setError("Invalid room or user");
       return;
     }
-
-    if (!user) {
-      setError("User not authenticated - please wait or refresh the page");
-      return;
-    }
-
-    if (!user.username) {
-      setError("Username not available - please refresh the page");
-      return;
-    }
-
-    console.log("Initializing meeting with:", { roomId, username: user.username });
 
     const init = async () => {
       try {
-        setStatus("Setting up peer connection...");
+        setStatus("Setting up connection...");
         
+        // Get user media
+        localStream.current = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true
+        });
+
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = localStream.current;
+        }
+
         // Create peer connection
         peerConnection.current = new RTCPeerConnection(configuration);
 
-        // Add connection state listeners
-        peerConnection.current.onconnectionstatechange = () => {
-          const state = peerConnection.current.connectionState;
-          console.log("Connection state changed:", state);
-          setStatus(`Connection state: ${state}`);
-          
-          if (state === "connected") {
-            setConnected(true);
-            setStatus("Connected");
-          } else if (state === "failed" || state === "disconnected") {
-            setConnected(false);
-            setStatus("Connection failed");
-          }
-        };
-
-        peerConnection.current.oniceconnectionstatechange = () => {
-          const state = peerConnection.current.iceConnectionState;
-          console.log("ICE connection state:", state);
-        };
-
-        setStatus("Requesting camera and microphone...");
-        
-        // Get user media with better error handling
-        try {
-          localStream.current = await navigator.mediaDevices.getUserMedia({
-            video: {
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-            },
-            audio: true,
-          });
-          
-          console.log("Got local stream:", localStream.current);
-          
-          // Set local video
-          if (localVideoRef.current) {
-            localVideoRef.current.srcObject = localStream.current;
-            localVideoRef.current.onloadedmetadata = () => {
-              console.log("Local video loaded");
-              setLocalVideoReady(true);
-            };
-          }
-          
-        } catch (mediaError) {
-          console.error("Error accessing media devices:", mediaError);
-          setError(`Camera/microphone access denied: ${mediaError.message}`);
-          return;
-        }
-
-        // Add tracks to peer connection
-        localStream.current.getTracks().forEach((track) => {
-          console.log("Adding track:", track.kind);
+        // Add local tracks
+        localStream.current.getTracks().forEach(track => {
           peerConnection.current.addTrack(track, localStream.current);
         });
 
-        // Setup remote stream
-        const remoteStream = new MediaStream();
+        // Set up remote stream
         if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = remoteStream;
-          remoteVideoRef.current.onloadedmetadata = () => {
-            console.log("Remote video loaded");
-            setRemoteVideoReady(true);
-          };
+          remoteVideoRef.current.srcObject = remoteStream.current;
         }
 
-        // Handle incoming tracks
+        // Handle remote tracks
         peerConnection.current.ontrack = (event) => {
-          console.log("Received remote track:", event.track.kind);
-          event.streams[0].getTracks().forEach((track) => {
-            remoteStream.addTrack(track);
-          });
+          remoteStream.current.addTrack(event.track);
         };
 
-        // Handle ICE candidates
+        // ICE candidate handling
         peerConnection.current.onicecandidate = (event) => {
           if (event.candidate) {
-            console.log("Sending ICE candidate");
             sendCandidate(roomId, user.username, event.candidate);
           }
         };
 
-        setStatus("Setting up signaling...");
+        // Connection state handling
+        peerConnection.current.onconnectionstatechange = () => {
+          const state = peerConnection.current.connectionState;
+          setStatus(`Connection state: ${state}`);
+          setConnected(state === "connected");
+        };
 
-        // Setup signaling listeners
+        // Set up signaling listeners
         const unsubOffer = listenForOffer(roomId, user.username, async (offer) => {
-          if (offer && peerConnection.current) {
-            console.log("Received offer, creating answer");
-            try {
-              await peerConnection.current.setRemoteDescription(
-                new RTCSessionDescription(offer)
-              );
-              const answer = await peerConnection.current.createAnswer();
-              await peerConnection.current.setLocalDescription(answer);
-              await sendAnswer(roomId, user.username, answer);
-              console.log("Answer sent");
-            } catch (err) {
-              console.error("Error handling offer:", err);
-              setError(`Error handling offer: ${err.message}`);
-            }
-          }
+          await peerConnection.current.setRemoteDescription(offer);
+          const answer = await peerConnection.current.createAnswer();
+          await peerConnection.current.setLocalDescription(answer);
+          await sendAnswer(roomId, user.username, answer);
         });
 
         const unsubAnswer = listenForAnswer(roomId, user.username, async (answer) => {
-          if (answer && peerConnection.current) {
-            console.log("Received answer");
-            try {
-              await peerConnection.current.setRemoteDescription(
-                new RTCSessionDescription(answer)
-              );
-            } catch (err) {
-              console.error("Error handling answer:", err);
-              setError(`Error handling answer: ${err.message}`);
-            }
-          }
+          await peerConnection.current.setRemoteDescription(answer);
         });
 
         const unsubCandidates = listenForCandidates(
           roomId,
           user.username,
           async (candidate) => {
-            if (peerConnection.current) {
-              try {
-                await peerConnection.current.addIceCandidate(
-                  new RTCIceCandidate(candidate)
-                );
-                console.log("Added ICE candidate");
-              } catch (err) {
-                console.error("Error adding ICE candidate:", err);
-              }
-            }
+            await peerConnection.current.addIceCandidate(candidate);
           }
         );
 
         // Create or join room
-        setStatus("Creating/joining room...");
         const { isInitiator } = await createRoom(roomId);
-        console.log("Room created/joined. Is initiator:", isInitiator);
-
         if (isInitiator) {
-          setStatus("Creating offer...");
           const offer = await peerConnection.current.createOffer();
           await peerConnection.current.setLocalDescription(offer);
           await sendOffer(roomId, user.username, offer);
-          console.log("Offer created and sent");
         }
 
         setStatus("Waiting for peer...");
 
-        // Cleanup function
         return () => {
-          console.log("Cleaning up...");
           unsubOffer();
           unsubAnswer();
           unsubCandidates();
@@ -225,22 +120,16 @@ const Meeting = () => {
             peerConnection.current.close();
           }
           if (localStream.current) {
-            localStream.current.getTracks().forEach((track) => track.stop());
+            localStream.current.getTracks().forEach(track => track.stop());
           }
         };
       } catch (err) {
         console.error("Error initializing meeting:", err);
-        setError(`Initialization error: ${err.message}`);
+        setError(err.message);
       }
     };
 
-    const cleanup = init();
-    
-    return () => {
-      if (cleanup && typeof cleanup.then === 'function') {
-        cleanup.then(cleanupFn => cleanupFn && cleanupFn());
-      }
-    };
+    init();
   }, [roomId, user]);
 
   if (error) {
@@ -263,7 +152,7 @@ const Meeting = () => {
   return (
     <div className="p-4 flex flex-col items-center justify-center min-h-screen bg-white">
       <h2 className="text-xl font-bold mb-4 text-center text-gray-800">
-        Meeting Room: <span className="text-blue-600">{roomId}</span>
+        Meeting Room: {roomId}
       </h2>
       
       <div className="mb-4 text-center">
@@ -273,9 +162,7 @@ const Meeting = () => {
 
       <div className="flex gap-6 justify-center items-center">
         <div>
-          <h3 className="text-center text-sm font-semibold text-gray-700">
-            You {localVideoReady ? "✓" : ""}
-          </h3>
+          <h3 className="text-center text-sm font-semibold text-gray-700">You</h3>
           <video
             ref={localVideoRef}
             autoPlay
@@ -285,9 +172,7 @@ const Meeting = () => {
           />
         </div>
         <div>
-          <h3 className="text-center text-sm font-semibold text-gray-700">
-            Peer {remoteVideoReady ? "✓" : ""}
-          </h3>
+          <h3 className="text-center text-sm font-semibold text-gray-700">Peer</h3>
           <video
             ref={remoteVideoRef}
             autoPlay
@@ -295,15 +180,6 @@ const Meeting = () => {
             className="w-64 h-48 rounded-lg border bg-gray-100"
           />
         </div>
-      </div>
-      
-      <div className="mt-4 text-center">
-        <p className="text-xs text-gray-500">
-          Local video: {localVideoReady ? "Ready" : "Loading..."}
-        </p>
-        <p className="text-xs text-gray-500">
-          Remote video: {remoteVideoReady ? "Ready" : "Waiting..."}
-        </p>
       </div>
     </div>
   );

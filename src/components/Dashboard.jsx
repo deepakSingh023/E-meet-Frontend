@@ -1,4 +1,3 @@
-// src/pages/Dashboard.jsx
 import React, { useEffect } from "react";
 import { useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
@@ -8,15 +7,11 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const user = useSelector((state) => state.auth.user);
 
-  // Debug: Log the user state
   useEffect(() => {
     console.log("Dashboard - Current user state:", user);
-    console.log("Dashboard - User username:", user?.username);
-    console.log("Dashboard - User videoCallId:", user?.videoCallId);
   }, [user]);
 
   const handleCreateMeeting = async () => {
-    // Check if user is available before creating meeting
     if (!user || !user.username) {
       console.error("User not available:", user);
       alert("Please wait for authentication to complete or try refreshing the page.");
@@ -25,15 +20,12 @@ const Dashboard = () => {
 
     try {
       const roomId = crypto.randomUUID();
-      console.log("Creating meeting with roomId:", roomId, "and user:", user.username);
+      console.log("Creating meeting with roomId:", roomId);
       
       await createRoom(roomId);
-      console.log("Room created successfully, navigating to:", `/meeting/${roomId}`);
+      console.log("Room created successfully");
       
-      // Add a small delay to ensure room is created
-      setTimeout(() => {
-        navigate(`/meeting/${roomId}`);
-      }, 100);
+      navigate(`/meeting/${roomId}`);
     } catch (err) {
       console.error("Error creating meeting:", err);
       alert("Couldn't create meeting. Try again.");
@@ -41,7 +33,6 @@ const Dashboard = () => {
   };
 
   const handleJoinMeeting = () => {
-    // Check if user is available before joining meeting
     if (!user || !user.username) {
       console.error("User not available:", user);
       alert("Please wait for authentication to complete or try refreshing the page.");
@@ -50,37 +41,28 @@ const Dashboard = () => {
 
     const roomId = prompt("Enter Meeting Code:");
     if (roomId && roomId.trim()) {
-      console.log("Joining meeting with roomId:", roomId, "and user:", user.username);
       navigate(`/meeting/${roomId.trim()}`);
     }
   };
 
-  // Show loading state if user is not yet available
   if (!user) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-white text-gray-900">
         <h1 className="text-2xl font-bold mb-4">Loading...</h1>
-        <p className="text-gray-600">Please wait while we authenticate you.</p>
       </div>
     );
   }
 
-  // Show error if user doesn't have required fields
   if (!user.username) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-white text-gray-900">
         <h1 className="text-2xl font-bold mb-4 text-red-600">Authentication Error</h1>
-        <p className="text-gray-600 mb-4">User information is incomplete.</p>
         <button 
           onClick={() => window.location.reload()} 
           className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
         >
           Refresh Page
         </button>
-        <div className="mt-4 p-4 bg-gray-100 rounded text-sm">
-          <p>Debug info:</p>
-          <pre>{JSON.stringify(user, null, 2)}</pre>
-        </div>
       </div>
     );
   }
@@ -88,15 +70,9 @@ const Dashboard = () => {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-white text-gray-900">
       <h1 className="text-4xl font-bold mb-6">
-        Welcome, {user?.username || "User"}!
+        Welcome, {user.username}!
       </h1>
       
-      {/* Debug info - remove this in production */}
-      <div className="mb-4 p-2 bg-gray-100 rounded text-xs text-gray-600">
-        <p>Debug: Username: {user.username}</p>
-        <p>Debug: VideoCallId: {user.videoCallId || "Not set"}</p>
-      </div>
-
       <div className="flex gap-4">
         <button
           onClick={handleCreateMeeting}
