@@ -8,7 +8,7 @@ import {
   listenForAnswer,
   sendIceCandidate,
   listenForIceCandidates,
-} from "./firebaseSignaling";
+} from "./firebaseSignaling.js";
 
 const servers = {
   iceServers: [
