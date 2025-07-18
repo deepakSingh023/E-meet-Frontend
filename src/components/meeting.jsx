@@ -1,190 +1,126 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useSelector } from "react-redux";
-import { getLocalStream, createPeerConnection, closeAllPeers } from "../webrtc";
-import socket from "../sockets";
+import { getLocalStream, createPeerConnection } from "../webrtc";
+import {
+  createRoom,
+  saveOffer,
+  listenForOffer,
+  saveAnswer,
+  listenForAnswer,
+  sendIceCandidate,
+  listenToRemoteCandidates,
+} from "../firebase/firestoreSignaling";
 
 export default function Meeting() {
   const { id: meetingId } = useParams();
   const navigate = useNavigate();
   const currentUser = useSelector((state) => state.auth.user);
   const localVideoRef = useRef(null);
-
   const [localStream, setLocalStream] = useState(null);
   const [remoteStreams, setRemoteStreams] = useState({});
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
-  const [participantCount, setParticipantCount] = useState(1);
   const peersRef = useRef({});
-  const [videoCallId, setVideoCallId] = useState(null);
+  const [participantCount, setParticipantCount] = useState(1);
 
   useEffect(() => {
     if (!currentUser) {
-      navigate('/login');
+      navigate("/login");
       return;
     }
 
     let mounted = true;
 
-    const initializeMeeting = async () => {
+    const init = async () => {
       try {
-        // First authenticate with socket if not already done
-        if (!socket.connected) {
-          await new Promise((resolve) => {
-            socket.once('connect', resolve);
-            socket.connect();
-          });
-        }
-
-        // Get local media stream
+        await createRoom(meetingId);
         const stream = await getLocalStream();
         if (!mounted) return;
-        
         setLocalStream(stream);
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = stream;
-        }
+        if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
-        // Join the meeting room
-        socket.emit("join-meeting", { meetingId });
+        const peerId = currentUser.id;
 
-      } catch (err) {
-        console.error("Failed to initialize meeting:", err);
-        alert("Could not access camera/microphone. Please check permissions.");
-        navigate('/dashboard');
+        listenForOffer(meetingId, peerId, async (offer) => {
+          if (peersRef.current[offer.from]) return;
+
+          const pc = await createPeerConnection(
+            offer.from,
+            stream,
+            (remoteStream) => handleRemoteStream(offer.from, remoteStream),
+            async (candidate) => sendIceCandidate(meetingId, offer.from, peerId, candidate)
+          );
+
+          peersRef.current[offer.from] = pc;
+
+          await pc.setRemoteDescription(new RTCSessionDescription(offer.offer));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          await saveAnswer(meetingId, offer.from, peerId, answer);
+
+          listenToRemoteCandidates(meetingId, offer.from, peerId, async (candidate) => {
+            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          });
+        });
+
+        listenForAnswer(meetingId, peerId, async (answerData) => {
+          const pc = peersRef.current[answerData.from];
+          if (pc) {
+            await pc.setRemoteDescription(new RTCSessionDescription(answerData.answer));
+          }
+        });
+
+        // You can define how to detect and create peers for other users.
+        // For demo, wait 2s and create one peer connection (mocking another user).
+        setTimeout(() => {
+          const otherUser = "user_" + Math.floor(Math.random() * 1000);
+          createPeer(otherUser);
+        }, 2000);
+
+      } catch (e) {
+        console.error("Meeting init error:", e);
+        navigate("/dashboard");
       }
     };
 
-    const setupSocketHandlers = () => {
-      // Handle successful meeting join
-      socket.on("meeting-joined", ({ yourId, existingUsers }) => {
-        setVideoCallId(yourId);
-        
-        // Create peer connections for existing participants
-        if (existingUsers && existingUsers.length > 0) {
-          existingUsers.forEach(async ({ userId }) => {
-            await createPeerForUser(userId);
-          });
-        }
-      });
-
-      // Handle new participants joining
-      socket.on("user-joined", ({ userId }) => {
-        console.log(`User ${userId} joined the meeting`);
-        setParticipantCount(prev => prev + 1);
-        
-        // Create peer connection for new participant
-        createPeerForUser(userId);
-      });
-
-      // Handle incoming offers
-      socket.on("offer", async ({ sender, offer }) => {
-        console.log("Received offer from:", sender);
-        if (!peersRef.current[sender] && localStream) {
-          const pc = await createPeerConnection(
-            sender,
-            localStream,
-            (remoteStream) => handleRemoteStream(sender, remoteStream)
-          );
-          
-          peersRef.current[sender] = pc;
-          await pc.setRemoteDescription(new RTCSessionDescription(offer));
-          
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          
-          socket.emit("answer", { target: sender, answer });
-        }
-      });
-
-      // Handle incoming answers
-      socket.on("answer", async ({ sender, answer }) => {
-        console.log("Received answer from:", sender);
-        const pc = peersRef.current[sender];
-        if (pc) {
-          await pc.setRemoteDescription(new RTCSessionDescription(answer));
-        }
-      });
-
-      // Handle ICE candidates
-      socket.on("ice-candidate", async ({ sender, candidate }) => {
-        const pc = peersRef.current[sender];
-        if (pc && candidate) {
-          try {
-            await pc.addIceCandidate(new RTCIceCandidate(candidate));
-          } catch (err) {
-            console.error("Error adding ICE candidate:", err);
-          }
-        }
-      });
-
-      // Handle participants leaving
-      socket.on("user-left", ({ userId }) => {
-        console.log(`User ${userId} left the meeting`);
-        removePeer(userId);
-        setParticipantCount(prev => Math.max(1, prev - 1));
-      });
-
-      // Handle meeting errors
-      socket.on("meeting-error", ({ message }) => {
-        alert(`Meeting error: ${message}`);
-        leaveMeeting();
-      });
-    };
-
-    const createPeerForUser = async (userId) => {
+    const createPeer = async (userId) => {
       if (!localStream || peersRef.current[userId]) return;
-      
+
       const pc = await createPeerConnection(
         userId,
         localStream,
-        (remoteStream) => handleRemoteStream(userId, remoteStream)
+        (remoteStream) => handleRemoteStream(userId, remoteStream),
+        async (candidate) => sendIceCandidate(meetingId, currentUser.id, userId, candidate)
       );
-      
+
       peersRef.current[userId] = pc;
-      
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      
-      socket.emit("offer", {
-        target: userId,
-        offer: offer
+      await saveOffer(meetingId, currentUser.id, userId, offer);
+
+      listenToRemoteCandidates(meetingId, currentUser.id, userId, async (candidate) => {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
       });
+
+      setParticipantCount((prev) => prev + 1);
     };
 
-    initializeMeeting();
-    setupSocketHandlers();
-
+    init();
     return () => {
       mounted = false;
       leaveMeeting();
     };
-  }, [currentUser, meetingId, navigate]);
+  }, [currentUser, meetingId]);
 
   const handleRemoteStream = (userId, stream) => {
-    setRemoteStreams(prev => ({
-      ...prev,
-      [userId]: stream
-    }));
-  };
-
-  const removePeer = (userId) => {
-    if (peersRef.current[userId]) {
-      peersRef.current[userId].close();
-      delete peersRef.current[userId];
-    }
-    
-    setRemoteStreams(prev => {
-      const updated = { ...prev };
-      delete updated[userId];
-      return updated;
-    });
+    setRemoteStreams((prev) => ({ ...prev, [userId]: stream }));
   };
 
   const toggleAudio = () => {
     if (localStream) {
       const newState = !isAudioEnabled;
-      localStream.getAudioTracks().forEach(track => (track.enabled = newState));
+      localStream.getAudioTracks().forEach((t) => (t.enabled = newState));
       setIsAudioEnabled(newState);
     }
   };
@@ -192,53 +128,33 @@ export default function Meeting() {
   const toggleVideo = () => {
     if (localStream) {
       const newState = !isVideoEnabled;
-      localStream.getVideoTracks().forEach(track => (track.enabled = newState));
+      localStream.getVideoTracks().forEach((t) => (t.enabled = newState));
       setIsVideoEnabled(newState);
     }
   };
 
   const leaveMeeting = () => {
-    // Clean up media streams
-    if (localStream) {
-      localStream.getTracks().forEach(track => track.stop());
-    }
-    
-    // Close all peer connections
-    Object.values(peersRef.current).forEach(pc => pc.close());
+    if (localStream) localStream.getTracks().forEach((t) => t.stop());
+    Object.values(peersRef.current).forEach((pc) => pc.close());
     peersRef.current = {};
-    
-    // Notify server we're leaving
-    socket.emit("leave-meeting", { meetingId });
-    
-    // Remove socket listeners
-    socket.off("meeting-joined");
-    socket.off("user-joined");
-    socket.off("offer");
-    socket.off("answer");
-    socket.off("ice-candidate");
-    socket.off("user-left");
-    socket.off("meeting-error");
-    
-    // Navigate back to dashboard
     navigate("/dashboard");
   };
 
   const copyMeetingId = () => {
     navigator.clipboard.writeText(meetingId);
-    alert("Meeting ID copied to clipboard!");
+    alert("Meeting ID copied!");
   };
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-900 text-white">
-      {/* Meeting header */}
       <div className="bg-gray-800 p-4 flex justify-between items-center">
         <div>
           <h2 className="text-xl font-semibold">Meeting: {meetingId}</h2>
           <div className="flex items-center mt-1">
             <span className="text-sm bg-blue-600 px-2 py-1 rounded">
-              {participantCount} {participantCount === 1 ? 'participant' : 'participants'}
+              {participantCount} {participantCount === 1 ? "participant" : "participants"}
             </span>
-            <button 
+            <button
               onClick={copyMeetingId}
               className="ml-2 bg-gray-700 hover:bg-gray-600 text-sm px-2 py-1 rounded"
             >
@@ -246,7 +162,7 @@ export default function Meeting() {
             </button>
           </div>
         </div>
-        <button 
+        <button
           onClick={leaveMeeting}
           className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-md font-medium"
         >
@@ -254,9 +170,7 @@ export default function Meeting() {
         </button>
       </div>
 
-      {/* Video grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4 flex-grow">
-        {/* Local video */}
         <div className="relative bg-black rounded-lg overflow-hidden">
           <video
             ref={localVideoRef}
@@ -267,12 +181,11 @@ export default function Meeting() {
           />
           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-2">
             <p className="text-sm font-medium">
-              {currentUser?.name || 'You'} {!isVideoEnabled && '(Camera off)'}
+              {currentUser?.name || "You"} {!isVideoEnabled && "(Camera off)"}
             </p>
           </div>
         </div>
 
-        {/* Remote videos */}
         {Object.entries(remoteStreams).map(([userId, stream]) => (
           <div key={userId} className="relative bg-black rounded-lg overflow-hidden">
             <video
@@ -288,7 +201,6 @@ export default function Meeting() {
         ))}
       </div>
 
-      {/* Controls toolbar */}
       <div className="bg-gray-800 p-4 flex justify-center space-x-4">
         <button
           onClick={toggleAudio}
@@ -296,26 +208,18 @@ export default function Meeting() {
             isAudioEnabled ? "bg-gray-700 hover:bg-gray-600" : "bg-red-600 hover:bg-red-700"
           }`}
         >
-          <span className="text-2xl">
-            {isAudioEnabled ? '🎤' : '🔇'}
-          </span>
-          <span className="text-xs mt-1">
-            {isAudioEnabled ? 'Mute' : 'Unmute'}
-          </span>
+          <span className="text-2xl">{isAudioEnabled ? "🎤" : "🔇"}</span>
+          <span className="text-xs mt-1">{isAudioEnabled ? "Mute" : "Unmute"}</span>
         </button>
-        
+
         <button
           onClick={toggleVideo}
           className={`flex flex-col items-center justify-center w-16 h-16 rounded-full ${
             isVideoEnabled ? "bg-gray-700 hover:bg-gray-600" : "bg-red-600 hover:bg-red-700"
           }`}
         >
-          <span className="text-2xl">
-            {isVideoEnabled ? '📹' : '📷'}
-          </span>
-          <span className="text-xs mt-1">
-            {isVideoEnabled ? 'Stop Video' : 'Start Video'}
-          </span>
+          <span className="text-2xl">{isVideoEnabled ? "📹" : "📷"}</span>
+          <span className="text-xs mt-1">{isVideoEnabled ? "Stop Video" : "Start Video"}</span>
         </button>
       </div>
     </div>
