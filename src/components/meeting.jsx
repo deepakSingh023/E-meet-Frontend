@@ -10,7 +10,7 @@ import {
   listenForAnswer,
   sendIceCandidate,
   listenToRemoteCandidates,
-} from "../firebase/firestoreSignaling";
+} from "../webrtc.js";
 
 export default function Meeting() {
   const { id: meetingId } = useParams();
