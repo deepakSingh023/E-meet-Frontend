@@ -32,8 +32,22 @@ const Meeting = () => {
   const [status, setStatus] = useState("Initializing...");
 
   useEffect(() => {
-    if (!roomId || !user) {
-      setError("Missing room ID or user information");
+    console.log("Meeting component - roomId:", roomId);
+    console.log("Meeting component - user:", user);
+    console.log("Meeting component - user.uid:", user?.uid);
+
+    if (!roomId) {
+      setError("Missing room ID");
+      return;
+    }
+
+    if (!user) {
+      setError("User not authenticated - please wait or refresh the page");
+      return;
+    }
+
+    if (!user.uid) {
+      setError("User ID not available - please refresh the page");
       return;
     }
 
