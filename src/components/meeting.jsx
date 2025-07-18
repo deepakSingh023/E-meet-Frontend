@@ -34,7 +34,7 @@ const Meeting = () => {
   useEffect(() => {
     console.log("Meeting component - roomId:", roomId);
     console.log("Meeting component - user:", user);
-    console.log("Meeting component - user.uid:", user?.uid);
+    console.log("Meeting component - user.username:", user?.username);
 
     if (!roomId) {
       setError("Missing room ID");
@@ -46,12 +46,12 @@ const Meeting = () => {
       return;
     }
 
-    if (!user.uid) {
-      setError("User ID not available - please refresh the page");
+    if (!user.username) {
+      setError("Username not available - please refresh the page");
       return;
     }
 
-    console.log("Initializing meeting with:", { roomId, userId: user.uid });
+    console.log("Initializing meeting with:", { roomId, username: user.username });
 
     const init = async () => {
       try {
@@ -137,14 +137,14 @@ const Meeting = () => {
         peerConnection.current.onicecandidate = (event) => {
           if (event.candidate) {
             console.log("Sending ICE candidate");
-            sendCandidate(roomId, user.uid, event.candidate);
+            sendCandidate(roomId, user.username, event.candidate);
           }
         };
 
         setStatus("Setting up signaling...");
 
         // Setup signaling listeners
-        const unsubOffer = listenForOffer(roomId, user.uid, async (offer) => {
+        const unsubOffer = listenForOffer(roomId, user.username, async (offer) => {
           if (offer && peerConnection.current) {
             console.log("Received offer, creating answer");
             try {
@@ -153,7 +153,7 @@ const Meeting = () => {
               );
               const answer = await peerConnection.current.createAnswer();
               await peerConnection.current.setLocalDescription(answer);
-              await sendAnswer(roomId, user.uid, answer);
+              await sendAnswer(roomId, user.username, answer);
               console.log("Answer sent");
             } catch (err) {
               console.error("Error handling offer:", err);
@@ -162,7 +162,7 @@ const Meeting = () => {
           }
         });
 
-        const unsubAnswer = listenForAnswer(roomId, user.uid, async (answer) => {
+        const unsubAnswer = listenForAnswer(roomId, user.username, async (answer) => {
           if (answer && peerConnection.current) {
             console.log("Received answer");
             try {
@@ -178,7 +178,7 @@ const Meeting = () => {
 
         const unsubCandidates = listenForCandidates(
           roomId,
-          user.uid,
+          user.username,
           async (candidate) => {
             if (peerConnection.current) {
               try {
@@ -202,7 +202,7 @@ const Meeting = () => {
           setStatus("Creating offer...");
           const offer = await peerConnection.current.createOffer();
           await peerConnection.current.setLocalDescription(offer);
-          await sendOffer(roomId, user.uid, offer);
+          await sendOffer(roomId, user.username, offer);
           console.log("Offer created and sent");
         }
 
