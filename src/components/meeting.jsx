@@ -83,13 +83,13 @@ const Meeting = () => {
       });
 
       // Step 2: Determine if user is initiator or joiner
-      const isInitiator = user.isInitiator; // Optional: Use redux or context
-      if (isInitiator) {
-        await createRoom(roomId);
-        const offer = await peerConnection.current.createOffer();
-        await peerConnection.current.setLocalDescription(offer);
-        await saveOffer(roomId, user.uid, offer);
-      }
+      const { isInitiator } = await createRoom(roomId);
+
+if (isInitiator) {
+  const offer = await peerConnection.current.createOffer();
+  await peerConnection.current.setLocalDescription(offer);
+  await saveOffer(roomId, user.uid, offer);
+}
 
       setConnected(true);
 

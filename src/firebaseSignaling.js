@@ -11,8 +11,14 @@ import { db } from "./firebase";
 
 export const createRoom = async (roomId) => {
   const roomRef = doc(db, "rooms", roomId);
-  await setDoc(roomRef, { created: Date.now() });
-  return roomRef;
+  const existing = await getDoc(roomRef);
+
+  if (!existing.exists()) {
+    await setDoc(roomRef, { created: Date.now() });
+    return { roomRef, isInitiator: true };
+  }
+
+  return { roomRef, isInitiator: false };
 };
 
 export const listenToRemoteCandidates = (roomId, peerId, callback) => {
