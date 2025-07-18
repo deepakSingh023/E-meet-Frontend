@@ -1,7 +1,7 @@
 import React from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { RootState } from '../redux/store'; // adjust path based on your store location
+import { RootState } from '../store/store'; // adjust path based on your store location
 import { v4 as uuidv4 } from 'uuid';
 
 const Dashboard = () => {
