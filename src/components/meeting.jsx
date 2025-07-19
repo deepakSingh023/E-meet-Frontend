@@ -8,9 +8,8 @@ import {
   sendCandidate,
   listenForCandidates,
 } from "../firebaseSignaling";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { useSelector } from "react-redux";
-import { useNavigate } from "react-router-dom";
 
 const configuration = {
   iceServers: [
@@ -21,8 +20,8 @@ const configuration = {
 
 const Meeting = () => {
   const { roomId } = useParams();
-  const authState = useSelector((state) => state.auth);
   const navigate = useNavigate();
+  const authState = useSelector((state) => state.auth);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const peerConnection = useRef(null);
@@ -39,16 +38,34 @@ const Meeting = () => {
   const userId = user?.uid || null;
 
   useEffect(() => {
-    if (isInitialized) return;
+    // Reset state on room change
+    setError(null);
+    setConnected(false);
+    setStatus("Initializing...");
+    setIsInitialized(false);
     
-    setError(null); // Reset error on reload
+    // Cleanup previous connection if any
+    return () => {
+      console.log("Cleaning up resources for room change");
+      listeners.current.forEach(unsub => unsub && unsub());
+      listeners.current = [];
+      
+      if (peerConnection.current) {
+        peerConnection.current.close();
+        peerConnection.current = null;
+      }
+      
+      if (localStream.current) {
+        localStream.current.getTracks().forEach(track => track.stop());
+        localStream.current = null;
+      }
+    };
+  }, [roomId]);
+
+  useEffect(() => {
+    if (isInitialized || !roomId) return;
     
-    if (!roomId) {
-      setError("Room ID is missing");
-      return;
-    }
-    
-    // Redirect to login if not authenticated
+    // Check authentication
     if (!authState.isAuthenticated || !userId) {
       setStatus("Redirecting to login...");
       navigate("/login");
@@ -56,6 +73,7 @@ const Meeting = () => {
     }
 
     const initMeeting = async () => {
+      console.log("Initializing meeting for room:", roomId);
       try {
         setIsInitialized(true);
         setStatus("Setting up connection...");
@@ -93,19 +111,21 @@ const Meeting = () => {
         // Handle remote tracks
         peerConnection.current.ontrack = (event) => {
           event.streams[0].getTracks().forEach(track => {
+            if (!remoteStream.current) return;
             remoteStream.current.addTrack(track);
           });
         };
 
         // ICE candidate handling
         peerConnection.current.onicecandidate = (event) => {
-          if (event.candidate) {
+          if (event.candidate && userId) {
             sendCandidate(roomId, userId, event.candidate);
           }
         };
 
         // Connection state handling
         peerConnection.current.onconnectionstatechange = () => {
+          if (!peerConnection.current) return;
           const state = peerConnection.current.connectionState;
           setStatus(`Connection state: ${state}`);
           setConnected(state === "connected");
@@ -124,6 +144,7 @@ const Meeting = () => {
           listenForOffer(roomId, userId, async (offer) => {
             setStatus("Received offer...");
             try {
+              if (!peerConnection.current) return;
               await peerConnection.current.setRemoteDescription(offer);
               const answer = await peerConnection.current.createAnswer();
               await peerConnection.current.setLocalDescription(answer);
@@ -140,6 +161,7 @@ const Meeting = () => {
           listenForAnswer(roomId, userId, async (answer) => {
             setStatus("Received answer...");
             try {
+              if (!peerConnection.current) return;
               await peerConnection.current.setRemoteDescription(answer);
             } catch (err) {
               console.error("Error handling answer:", err);
@@ -151,6 +173,7 @@ const Meeting = () => {
         listeners.current.push(
           listenForCandidates(roomId, userId, async (candidate) => {
             try {
+              if (!peerConnection.current) return;
               await peerConnection.current.addIceCandidate(
                 new RTCIceCandidate(candidate)
               );
@@ -164,6 +187,7 @@ const Meeting = () => {
         if (isInitiator) {
           setStatus("Creating offer...");
           try {
+            if (!peerConnection.current) return;
             const offer = await peerConnection.current.createOffer();
             await peerConnection.current.setLocalDescription(offer);
             await sendOffer(roomId, userId, offer);
@@ -184,24 +208,21 @@ const Meeting = () => {
 
     initMeeting();
 
-    // Cleanup function
+    // Full cleanup on unmount
     return () => {
-      console.log("Cleaning up meeting resources");
-      // Unsubscribe all listeners
+      console.log("Full cleanup on component unmount");
       listeners.current.forEach(unsub => unsub && unsub());
       listeners.current = [];
       
-      // Close peer connection
       if (peerConnection.current) {
         peerConnection.current.close();
+        peerConnection.current = null;
       }
       
-      // Stop media tracks
       if (localStream.current) {
         localStream.current.getTracks().forEach(track => track.stop());
+        localStream.current = null;
       }
-      
-      setIsInitialized(false);
     };
   }, [roomId, authState, userId, navigate, isInitialized]);
 
