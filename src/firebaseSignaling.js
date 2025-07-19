@@ -126,7 +126,7 @@ export const listenForCandidates = (roomId, myUserId, callback) => {
         if (change.type === "added") {
           const data = change.doc.data();
           if (data.userId !== myUserId && data.candidate) {
-            callback(new RTCIceCandidate(data.candidate));
+            callback(data.candidate);
           }
         }
       });
