@@ -10,6 +10,7 @@ import {
 } from "../firebaseSignaling";
 import { useParams } from "react-router-dom";
 import { useSelector } from "react-redux";
+import { useNavigate } from "react-router-dom";
 
 const configuration = {
   iceServers: [
@@ -20,7 +21,8 @@ const configuration = {
 
 const Meeting = () => {
   const { roomId } = useParams();
-  const user = useSelector((state) => state.auth.user);
+  const authState = useSelector((state) => state.auth);
+  const navigate = useNavigate();
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const peerConnection = useRef(null);
@@ -31,6 +33,10 @@ const Meeting = () => {
   const [error, setError] = useState(null);
   const listeners = useRef([]);
 
+  // Get user safely from auth state
+  const user = authState?.user || null;
+  const userId = user?.uid || null;
+
   useEffect(() => {
     setError(null); // Reset error on reload
     
@@ -39,8 +45,10 @@ const Meeting = () => {
       return;
     }
     
-    if (!user || !user.uid) {
-      setError("User not available. Please log in.");
+    // Redirect to login if not authenticated
+    if (!authState.isAuthenticated || !userId) {
+      setStatus("Redirecting to login...");
+      navigate("/login");
       return;
     }
 
@@ -88,7 +96,7 @@ const Meeting = () => {
         // ICE candidate handling
         peerConnection.current.onicecandidate = (event) => {
           if (event.candidate) {
-            sendCandidate(roomId, user.uid, event.candidate);
+            sendCandidate(roomId, userId, event.candidate);
           }
         };
 
@@ -109,13 +117,13 @@ const Meeting = () => {
 
         // Set up signaling listeners
         listeners.current.push(
-          listenForOffer(roomId, user.uid, async (offer) => {
+          listenForOffer(roomId, userId, async (offer) => {
             setStatus("Received offer...");
             try {
               await peerConnection.current.setRemoteDescription(offer);
               const answer = await peerConnection.current.createAnswer();
               await peerConnection.current.setLocalDescription(answer);
-              await sendAnswer(roomId, user.uid, answer);
+              await sendAnswer(roomId, userId, answer);
               setStatus("Sent answer");
             } catch (err) {
               console.error("Error handling offer:", err);
@@ -125,7 +133,7 @@ const Meeting = () => {
         );
 
         listeners.current.push(
-          listenForAnswer(roomId, user.uid, async (answer) => {
+          listenForAnswer(roomId, userId, async (answer) => {
             setStatus("Received answer...");
             try {
               await peerConnection.current.setRemoteDescription(answer);
@@ -137,7 +145,7 @@ const Meeting = () => {
         );
 
         listeners.current.push(
-          listenForCandidates(roomId, user.uid, async (candidate) => {
+          listenForCandidates(roomId, userId, async (candidate) => {
             try {
               await peerConnection.current.addIceCandidate(
                 new RTCIceCandidate(candidate)
@@ -154,7 +162,7 @@ const Meeting = () => {
           try {
             const offer = await peerConnection.current.createOffer();
             await peerConnection.current.setLocalDescription(offer);
-            await sendOffer(roomId, user.uid, offer);
+            await sendOffer(roomId, userId, offer);
             setStatus("Offer sent, waiting for peer...");
           } catch (err) {
             console.error("Error creating offer:", err);
@@ -188,7 +196,7 @@ const Meeting = () => {
         localStream.current.getTracks().forEach(track => track.stop());
       }
     };
-  }, [roomId, user]);
+  }, [roomId, authState, userId, navigate]);
 
   if (error) {
     return (
