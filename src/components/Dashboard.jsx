@@ -84,7 +84,7 @@ const Dashboard = () => {
           onClick={handleJoinMeeting}
           className="bg-green-600 text-white px-6 py-3 rounded-xl hover:bg-green-700 transition-colors"
         >
-          Join Meeting
+          Join Meetin
         </button>
       </div>
     </div>
