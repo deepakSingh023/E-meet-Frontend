@@ -32,12 +32,15 @@ const Meeting = () => {
   const [status, setStatus] = useState("Initializing...");
   const [error, setError] = useState(null);
   const listeners = useRef([]);
+  const [isInitialized, setIsInitialized] = useState(false);
 
   // Get user safely from auth state
   const user = authState?.user || null;
   const userId = user?.uid || null;
 
   useEffect(() => {
+    if (isInitialized) return;
+    
     setError(null); // Reset error on reload
     
     if (!roomId) {
@@ -52,8 +55,9 @@ const Meeting = () => {
       return;
     }
 
-    const init = async () => {
+    const initMeeting = async () => {
       try {
+        setIsInitialized(true);
         setStatus("Setting up connection...");
         
         // Get user media
@@ -178,10 +182,11 @@ const Meeting = () => {
       }
     };
 
-    init();
+    initMeeting();
 
     // Cleanup function
     return () => {
+      console.log("Cleaning up meeting resources");
       // Unsubscribe all listeners
       listeners.current.forEach(unsub => unsub && unsub());
       listeners.current = [];
@@ -195,8 +200,10 @@ const Meeting = () => {
       if (localStream.current) {
         localStream.current.getTracks().forEach(track => track.stop());
       }
+      
+      setIsInitialized(false);
     };
-  }, [roomId, authState, userId, navigate]);
+  }, [roomId, authState, userId, navigate, isInitialized]);
 
   if (error) {
     return (
