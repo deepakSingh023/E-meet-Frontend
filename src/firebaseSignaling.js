@@ -7,6 +7,7 @@ import {
   onSnapshot,
   query,
   orderBy,
+  deleteDoc
 } from "firebase/firestore";
 import { db } from "./firebase";
 
@@ -18,23 +19,23 @@ export const createRoom = async (roomId) => {
     if (!existing.exists()) {
       await setDoc(roomRef, { 
         created: Date.now(),
-        participants: []
+        active: true
       });
-      return { roomRef, isInitiator: true };
+      return { isInitiator: true };
     }
 
-    return { roomRef, isInitiator: false };
+    return { isInitiator: false };
   } catch (error) {
     console.error("Error creating/joining room:", error);
     throw error;
   }
 };
 
-export const sendOffer = async (roomId, senderId, offer) => {
+export const sendOffer = async (roomId, userId, offer) => {
   try {
-    const offerRef = doc(db, `rooms/${roomId}/offers`, senderId);
+    const offerRef = doc(db, `rooms/${roomId}/offers`, userId);
     await setDoc(offerRef, { 
-      sender: senderId, 
+      userId, 
       offer,
       timestamp: Date.now()
     });
@@ -44,7 +45,7 @@ export const sendOffer = async (roomId, senderId, offer) => {
   }
 };
 
-export const listenForOffer = (roomId, myId, callback) => {
+export const listenForOffer = (roomId, myUserId, callback) => {
   try {
     const offersRef = collection(db, `rooms/${roomId}/offers`);
     
@@ -52,7 +53,9 @@ export const listenForOffer = (roomId, myId, callback) => {
       snapshot.docChanges().forEach((change) => {
         if (change.type === "added") {
           const data = change.doc.data();
-          if (data.sender !== myId && data.offer) {
+          if (data.userId !== myUserId && data.offer) {
+            // Delete offer after receiving
+            deleteDoc(change.doc.ref);
             callback(data.offer);
           }
         }
@@ -64,11 +67,11 @@ export const listenForOffer = (roomId, myId, callback) => {
   }
 };
 
-export const sendAnswer = async (roomId, senderId, answer) => {
+export const sendAnswer = async (roomId, userId, answer) => {
   try {
-    const answerRef = doc(db, `rooms/${roomId}/answers`, senderId);
+    const answerRef = doc(db, `rooms/${roomId}/answers`, userId);
     await setDoc(answerRef, { 
-      sender: senderId, 
+      userId, 
       answer,
       timestamp: Date.now()
     });
@@ -78,7 +81,7 @@ export const sendAnswer = async (roomId, senderId, answer) => {
   }
 };
 
-export const listenForAnswer = (roomId, myId, callback) => {
+export const listenForAnswer = (roomId, myUserId, callback) => {
   try {
     const answersRef = collection(db, `rooms/${roomId}/answers`);
     
@@ -86,7 +89,9 @@ export const listenForAnswer = (roomId, myId, callback) => {
       snapshot.docChanges().forEach((change) => {
         if (change.type === "added") {
           const data = change.doc.data();
-          if (data.sender !== myId && data.answer) {
+          if (data.userId !== myUserId && data.answer) {
+            // Delete answer after receiving
+            deleteDoc(change.doc.ref);
             callback(data.answer);
           }
         }
@@ -98,11 +103,11 @@ export const listenForAnswer = (roomId, myId, callback) => {
   }
 };
 
-export const sendCandidate = async (roomId, senderId, candidate) => {
+export const sendCandidate = async (roomId, userId, candidate) => {
   try {
     const candidateRef = collection(db, `rooms/${roomId}/candidates`);
     await addDoc(candidateRef, {
-      sender: senderId,
+      userId,
       candidate,
       timestamp: Date.now(),
     });
@@ -111,7 +116,7 @@ export const sendCandidate = async (roomId, senderId, candidate) => {
   }
 };
 
-export const listenForCandidates = (roomId, myId, callback) => {
+export const listenForCandidates = (roomId, myUserId, callback) => {
   try {
     const candidatesRef = collection(db, `rooms/${roomId}/candidates`);
     const q = query(candidatesRef, orderBy("timestamp", "asc"));
@@ -120,8 +125,8 @@ export const listenForCandidates = (roomId, myId, callback) => {
       snapshot.docChanges().forEach((change) => {
         if (change.type === "added") {
           const data = change.doc.data();
-          if (data.sender !== myId && data.candidate) {
-            callback(data.candidate);
+          if (data.userId !== myUserId && data.candidate) {
+            callback(new RTCIceCandidate(data.candidate));
           }
         }
       });
