@@ -25,13 +25,14 @@ const Meeting = () => {
   const remoteVideoRef = useRef(null);
   const peerConnection = useRef(null);
   const localStream = useRef(null);
-  const remoteStream = useRef(new MediaStream());
+  const remoteStream = useRef(null);
   const [connected, setConnected] = useState(false);
   const [status, setStatus] = useState("Initializing...");
   const [error, setError] = useState(null);
+  const listeners = useRef([]);
 
   useEffect(() => {
-    if (!roomId || !user?.username) {
+    if (!roomId || !user?.uid) {
       setError("Invalid room or user");
       return;
     }
@@ -50,6 +51,12 @@ const Meeting = () => {
           localVideoRef.current.srcObject = localStream.current;
         }
 
+        // Create remote stream
+        remoteStream.current = new MediaStream();
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = remoteStream.current;
+        }
+
         // Create peer connection
         peerConnection.current = new RTCPeerConnection(configuration);
 
@@ -58,20 +65,17 @@ const Meeting = () => {
           peerConnection.current.addTrack(track, localStream.current);
         });
 
-        // Set up remote stream
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = remoteStream.current;
-        }
-
         // Handle remote tracks
         peerConnection.current.ontrack = (event) => {
-          remoteStream.current.addTrack(event.track);
+          event.streams[0].getTracks().forEach(track => {
+            remoteStream.current.addTrack(track);
+          });
         };
 
         // ICE candidate handling
         peerConnection.current.onicecandidate = (event) => {
           if (event.candidate) {
-            sendCandidate(roomId, user.username, event.candidate);
+            sendCandidate(roomId, user.uid, event.candidate);
           }
         };
 
@@ -82,54 +86,74 @@ const Meeting = () => {
           setConnected(state === "connected");
         };
 
+        // Create or join room first
+        setStatus("Joining room...");
+        const { isInitiator } = await createRoom(roomId);
+
         // Set up signaling listeners
-        const unsubOffer = listenForOffer(roomId, user.username, async (offer) => {
-          await peerConnection.current.setRemoteDescription(offer);
-          const answer = await peerConnection.current.createAnswer();
-          await peerConnection.current.setLocalDescription(answer);
-          await sendAnswer(roomId, user.username, answer);
-        });
-
-        const unsubAnswer = listenForAnswer(roomId, user.username, async (answer) => {
-          await peerConnection.current.setRemoteDescription(answer);
-        });
-
-        const unsubCandidates = listenForCandidates(
-          roomId,
-          user.username,
-          async (candidate) => {
-            await peerConnection.current.addIceCandidate(candidate);
-          }
+        listeners.current.push(
+          listenForOffer(roomId, user.uid, async (offer) => {
+            setStatus("Received offer...");
+            await peerConnection.current.setRemoteDescription(offer);
+            const answer = await peerConnection.current.createAnswer();
+            await peerConnection.current.setLocalDescription(answer);
+            await sendAnswer(roomId, user.uid, answer);
+            setStatus("Sent answer");
+          })
         );
 
-        // Create or join room
-        const { isInitiator } = await createRoom(roomId);
+        listeners.current.push(
+          listenForAnswer(roomId, user.uid, async (answer) => {
+            setStatus("Received answer...");
+            await peerConnection.current.setRemoteDescription(answer);
+          })
+        );
+
+        listeners.current.push(
+          listenForCandidates(roomId, user.uid, async (candidate) => {
+            try {
+              await peerConnection.current.addIceCandidate(candidate);
+            } catch (e) {
+              console.error("Error adding ICE candidate:", e);
+            }
+          })
+        );
+
+        // If initiator, create and send offer
         if (isInitiator) {
+          setStatus("Creating offer...");
           const offer = await peerConnection.current.createOffer();
           await peerConnection.current.setLocalDescription(offer);
-          await sendOffer(roomId, user.username, offer);
+          await sendOffer(roomId, user.uid, offer);
+          setStatus("Offer sent, waiting for peer...");
+        } else {
+          setStatus("Waiting for offer...");
         }
 
-        setStatus("Waiting for peer...");
-
-        return () => {
-          unsubOffer();
-          unsubAnswer();
-          unsubCandidates();
-          if (peerConnection.current) {
-            peerConnection.current.close();
-          }
-          if (localStream.current) {
-            localStream.current.getTracks().forEach(track => track.stop());
-          }
-        };
       } catch (err) {
         console.error("Error initializing meeting:", err);
-        setError(err.message);
+        setError(err.message || "Failed to start meeting");
       }
     };
 
     init();
+
+    // Cleanup function
+    return () => {
+      // Unsubscribe all listeners
+      listeners.current.forEach(unsub => unsub());
+      listeners.current = [];
+      
+      // Close peer connection
+      if (peerConnection.current) {
+        peerConnection.current.close();
+      }
+      
+      // Stop media tracks
+      if (localStream.current) {
+        localStream.current.getTracks().forEach(track => track.stop());
+      }
+    };
   }, [roomId, user]);
 
   if (error) {
